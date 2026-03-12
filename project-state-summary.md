@@ -35,9 +35,10 @@ Current implementation state:
   - uiInjector: showToast() — all verified (fade animation, formatTime, accessibility, DOM removal)
   - popup: layout, storage read, cross-promo links, inline confirmation, clear action — all verified
   - bootstrap: orchestration — all verified (teardown, page check, wait -> tryResume -> startTracker, error catching)
+  - pre-release polish: logs removed, copy audited, permissions verified — complete
 
 - What is pending:
-  - Phase 12 — Pre-Release Polish
+  - None — Project complete!
 
 - Known issues (if any):
   - None

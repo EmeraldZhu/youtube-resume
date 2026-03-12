@@ -91,4 +91,4 @@ const playerObserver = (() => {
   return { waitForVideo, isAdPlaying, disconnect };
 })();
 
-console.log('[YTResume] playerObserver.js loaded');
+

@@ -46,4 +46,4 @@ const youtubeUtils = {
   },
 };
 
-console.log('[YTResume] youtubeUtils.js loaded');
+

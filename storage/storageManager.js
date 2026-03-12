@@ -69,4 +69,4 @@ const storageManager = (() => {
   return { getProgress, saveProgress, deleteProgress };
 })();
 
-console.log('[YTResume] storageManager.js loaded');
+

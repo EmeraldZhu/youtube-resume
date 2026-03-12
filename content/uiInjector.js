@@ -199,4 +199,4 @@ const uiInjector = (() => {
   return { showRestartButton, showToast, cleanup };
 })();
 
-console.log('[YTResume] uiInjector.js loaded');
+

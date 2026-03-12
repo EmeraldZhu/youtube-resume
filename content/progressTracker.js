@@ -103,4 +103,4 @@ const progressTracker = (() => {
   return { start, stop };
 })();
 
-console.log('[YTResume] progressTracker.js loaded');
+

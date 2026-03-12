@@ -57,7 +57,7 @@
    */
   function init() {
     navigationManager.start(onVideoChange);
-    console.log('[YTResume] Extension initialized');
+
   }
 
   init();

@@ -90,4 +90,4 @@ const resumeManager = (() => {
   return { tryResume };
 })();
 
-console.log('[YTResume] resumeManager.js loaded');
+

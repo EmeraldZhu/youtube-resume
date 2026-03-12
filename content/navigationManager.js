@@ -81,4 +81,4 @@ const navigationManager = (() => {
   return { start, stop };
 })();
 
-console.log('[YTResume] navigationManager.js loaded');
+
