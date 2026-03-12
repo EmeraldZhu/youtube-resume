@@ -5,6 +5,9 @@
   "description": "Automatically resume YouTube videos exactly where you left off.",
   "permissions": ["storage"],
   "host_permissions": ["https://www.youtube.com/*"],
+  "action": {
+    "default_popup": "popup/popup.html"
+  },
   "content_scripts": [
     {
       "matches": ["https://www.youtube.com/*"],

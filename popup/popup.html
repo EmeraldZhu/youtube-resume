@@ -1,0 +1,72 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>YouTube Resume</title>
+  <link rel="stylesheet" href="popup.css">
+</head>
+<body>
+  <div class="container">
+    <!-- Section A: Header -->
+    <header class="section header">
+      <h1 class="title">YouTube Resume</h1>
+      <p class="subtitle">Pick up right where you left off.</p>
+    </header>
+
+    <hr class="divider">
+
+    <!-- Section B: Status -->
+    <div class="section status-row">
+      <span class="label">Status</span>
+      <span class="value success">✓ Active on YouTube</span>
+    </div>
+
+    <hr class="divider">
+
+    <!-- Section C: Storage stat -->
+    <div class="section stat-row">
+      <span class="label">Saved videos</span>
+      <span class="value stat-number" id="saved-count">—</span>
+    </div>
+
+    <!-- Section D: Clear action -->
+    <div class="section action-row" id="clear-container">
+      <button id="clear-btn" class="btn-ghost">Clear saved progress</button>
+      
+      <!-- Inline Confirmation (Hidden initially) -->
+      <div id="confirm-panel" class="confirm-panel hidden">
+        <p class="confirm-text">Clear all saved resume data?</p>
+        <p class="confirm-subtext">This will remove resume positions for all <span id="confirm-count">0</span> saved videos. This cannot be undone.</p>
+        <div class="confirm-actions">
+          <button id="cancel-btn" class="btn-ghost btn-cancel">Cancel</button>
+          <button id="confirm-btn" class="btn-danger">Clear</button>
+        </div>
+      </div>
+    </div>
+
+    <hr class="divider">
+
+    <!-- Section E: Support -->
+    <div class="section support-row">
+      <span class="label">Support development ❤️</span>
+      <a href="https://ko-fi.com/emeraldzhu" target="_blank" rel="noopener noreferrer" class="link-muted">Buy me a coffee</a>
+    </div>
+
+    <hr class="divider">
+
+    <!-- Section F: Cross-promo -->
+    <div class="section promo-row">
+      <h2 class="promo-header">Other tools</h2>
+      <div class="promo-card">
+        <a href="https://sessionswitcher.emeraldzhu.com/" target="_blank" rel="noopener noreferrer" class="promo-link">
+          <span class="promo-title">Session Switcher</span>
+          <span class="promo-desc">Switch between multiple account sessions.</span>
+        </a>
+      </div>
+    </div>
+
+  </div>
+
+  <script src="popup.js"></script>
+</body>
+</html>

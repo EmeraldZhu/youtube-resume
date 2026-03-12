@@ -1,10 +1,13 @@
 PROJECT STATE SUMMARY
 =====================
 Current implementation state:
-- Phase: Phase 9 — Resume Toast (Complete)
+- Phase: Phase 10 — Extension Popup (Complete)
 
 - Files created so far:
-  - manifest.json (MV3, content scripts in correct load order, icons referenced)
+  - manifest.json (MV3, content scripts in correct load order, action/popup registered, icons referenced)
+  - popup/popup.html (implemented — 6 sections layout, inline confirmation panel)
+  - popup/popup.css (implemented — system font stack, 280px fixed width, UI state styling)
+  - popup/popup.js (implemented — storage read, inline confirmation interactions, clear action)
   - content/bootstrap.js (temporary Phase 4 verification wiring)
   - content/navigationManager.js (implemented — start, stop, SPA + cold load + fallback)
   - content/playerObserver.js (implemented — waitForVideo, isAdPlaying, disconnect)
@@ -30,9 +33,9 @@ Current implementation state:
   - progressTracker: start(), stop() — all verified (interval, pause, seeked, visibilitychange, beforeunload, ad/live/delta guards)
   - uiInjector: showRestartButton(), cleanup() — all verified (button injection, styling, hover, click, auto-dismiss)
   - uiInjector: showToast() — all verified (fade animation, formatTime, accessibility, DOM removal)
+  - popup: layout, storage read, cross-promo links, inline confirmation, clear action — all verified
 
 - What is pending:
-  - Phase 10 — Extension Popup
   - Phase 11 — Integration & Hardening (bootstrap.js full wiring)
   - Phase 12 — Pre-Release Polish
 
