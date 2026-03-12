@@ -1,0 +1,30 @@
+{
+  "manifest_version": 3,
+  "name": "YouTube Resume",
+  "version": "1.0.0",
+  "description": "Automatically resume YouTube videos exactly where you left off.",
+  "permissions": ["storage"],
+  "host_permissions": ["https://www.youtube.com/*"],
+  "content_scripts": [
+    {
+      "matches": ["https://www.youtube.com/*"],
+      "js": [
+        "storage/storageManager.js",
+        "utils/youtubeUtils.js",
+        "utils/timeUtils.js",
+        "content/playerObserver.js",
+        "content/uiInjector.js",
+        "content/resumeManager.js",
+        "content/navigationManager.js",
+        "content/progressTracker.js",
+        "content/bootstrap.js"
+      ],
+      "run_at": "document_idle"
+    }
+  ],
+  "icons": {
+    "16": "assets/icons/icon-16.png",
+    "48": "assets/icons/icon-48.png",
+    "128": "assets/icons/icon-128.png"
+  }
+}
