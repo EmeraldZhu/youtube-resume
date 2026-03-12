@@ -1,13 +1,13 @@
 PROJECT STATE SUMMARY
 =====================
 Current implementation state:
-- Phase: Phase 4 — Navigation Manager (Complete)
+- Phase: Phase 5 — Player Observer (Complete)
 
 - Files created so far:
   - manifest.json (MV3, content scripts in correct load order, icons referenced)
   - content/bootstrap.js (temporary Phase 4 verification wiring)
   - content/navigationManager.js (implemented — start, stop, SPA + cold load + fallback)
-  - content/playerObserver.js (stub)
+  - content/playerObserver.js (implemented — waitForVideo, isAdPlaying, disconnect)
   - content/resumeManager.js (stub)
   - content/progressTracker.js (stub)
   - content/uiInjector.js (stub)
@@ -25,9 +25,9 @@ Current implementation state:
   - timeUtils: shouldResume(), getResumeTime() — all verified
   - storageManager: getProgress(), saveProgress(), deleteProgress(), eviction — all verified
   - navigationManager: start(), stop(), yt-navigate-finish, cold load, fallback polling — all verified
+  - playerObserver: waitForVideo(), isAdPlaying(), disconnect() — all verified
 
 - What is pending:
-  - Phase 5 — Player Observer
   - Phase 6 — Resume Manager
   - Phase 7 — Progress Tracker
   - Phase 8 — Restart Button
