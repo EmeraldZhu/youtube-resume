@@ -6,4 +6,10 @@
  *
  * This module is self-executing on load.
  */
+
+// Temporary verification callback for Phase 4 testing
+navigationManager.start((videoId) => {
+  console.log('[YTResume] videoChange:', videoId);
+});
+
 console.log('[YTResume] bootstrap.js loaded');
