@@ -1,16 +1,16 @@
 PROJECT STATE SUMMARY
 =====================
 Current implementation state:
-- Phase: Phase 8 — Restart Button (Complete)
+- Phase: Phase 9 — Resume Toast (Complete)
 
 - Files created so far:
   - manifest.json (MV3, content scripts in correct load order, icons referenced)
   - content/bootstrap.js (temporary Phase 4 verification wiring)
   - content/navigationManager.js (implemented — start, stop, SPA + cold load + fallback)
   - content/playerObserver.js (implemented — waitForVideo, isAdPlaying, disconnect)
-  - content/resumeManager.js (implemented — tryResume with metadata wait, validation, delay, seek)
+  - content/resumeManager.js (implemented — tryResume, wired to showRestartButton + showToast)
   - content/progressTracker.js (implemented — start, stop, interval + event tracking, guards)
-  - content/uiInjector.js (implemented — showRestartButton, cleanup, auto-dismiss, click handler)
+  - content/uiInjector.js (implemented — showRestartButton, showToast, cleanup)
   - storage/storageManager.js (implemented — getProgress, saveProgress, deleteProgress, eviction)
   - utils/youtubeUtils.js (implemented — 4 functions)
   - utils/timeUtils.js (implemented — 3 constants, 2 functions)
@@ -29,9 +29,9 @@ Current implementation state:
   - resumeManager: tryResume() — all verified (metadata wait, shouldResume, 400ms delay, seek, error catching)
   - progressTracker: start(), stop() — all verified (interval, pause, seeked, visibilitychange, beforeunload, ad/live/delta guards)
   - uiInjector: showRestartButton(), cleanup() — all verified (button injection, styling, hover, click, auto-dismiss)
+  - uiInjector: showToast() — all verified (fade animation, formatTime, accessibility, DOM removal)
 
 - What is pending:
-  - Phase 9 — Resume Toast (optional for v1.0)
   - Phase 10 — Extension Popup
   - Phase 11 — Integration & Hardening (bootstrap.js full wiring)
   - Phase 12 — Pre-Release Polish

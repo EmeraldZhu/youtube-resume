@@ -84,6 +84,7 @@ const resumeManager = (() => {
     }
 
     uiInjector.showRestartButton(video, videoId);
+    uiInjector.showToast(resumeTime);
   }
 
   return { tryResume };
