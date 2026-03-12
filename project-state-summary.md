@@ -1,7 +1,7 @@
 PROJECT STATE SUMMARY
 =====================
 Current implementation state:
-- Phase: Phase 1 — Project Scaffold (Complete)
+- Phase: Phase 2 — Utility Functions (Complete)
 
 - Files created so far:
   - manifest.json (MV3, content scripts in correct load order, icons referenced)
@@ -12,19 +12,20 @@ Current implementation state:
   - content/progressTracker.js (stub)
   - content/uiInjector.js (stub)
   - storage/storageManager.js (stub)
-  - utils/youtubeUtils.js (stub)
-  - utils/timeUtils.js (stub)
-  - assets/icons/icon-16.png (moved from root)
-  - assets/icons/icon-48.png (moved from root)
-  - assets/icons/icon-128.png (moved from root)
+  - utils/youtubeUtils.js (implemented — 4 functions)
+  - utils/timeUtils.js (implemented — 3 constants, 2 functions)
+  - assets/icons/icon-16.png
+  - assets/icons/icon-48.png
+  - assets/icons/icon-128.png
 
 - What works:
   - Extension loads in Chrome via Load Unpacked without errors
   - All 9 JS modules log their load message to DevTools Console
-  - No errors or warnings on the Extensions management page
+  - youtubeUtils: isWatchPage(), getVideoId(), isShorts(), isLive() — all verified
+  - timeUtils: shouldResume(), getResumeTime() — all verified
+  - All Dev Checklist §2.1 and §2.2 verification cases pass
 
 - What is pending:
-  - Phase 2 — Utility Functions (youtubeUtils.js, timeUtils.js)
   - Phase 3 — Storage Manager
   - Phase 4 — Navigation Manager
   - Phase 5 — Player Observer
