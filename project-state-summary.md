@@ -1,7 +1,7 @@
 PROJECT STATE SUMMARY
 =====================
 Current implementation state:
-- Phase: Phase 7 — Progress Tracker (Complete)
+- Phase: Phase 8 — Restart Button (Complete)
 
 - Files created so far:
   - manifest.json (MV3, content scripts in correct load order, icons referenced)
@@ -10,7 +10,7 @@ Current implementation state:
   - content/playerObserver.js (implemented — waitForVideo, isAdPlaying, disconnect)
   - content/resumeManager.js (implemented — tryResume with metadata wait, validation, delay, seek)
   - content/progressTracker.js (implemented — start, stop, interval + event tracking, guards)
-  - content/uiInjector.js (callable stub — showRestartButton, cleanup)
+  - content/uiInjector.js (implemented — showRestartButton, cleanup, auto-dismiss, click handler)
   - storage/storageManager.js (implemented — getProgress, saveProgress, deleteProgress, eviction)
   - utils/youtubeUtils.js (implemented — 4 functions)
   - utils/timeUtils.js (implemented — 3 constants, 2 functions)
@@ -28,14 +28,13 @@ Current implementation state:
   - playerObserver: waitForVideo(), isAdPlaying(), disconnect() — all verified
   - resumeManager: tryResume() — all verified (metadata wait, shouldResume, 400ms delay, seek, error catching)
   - progressTracker: start(), stop() — all verified (interval, pause, seeked, visibilitychange, beforeunload, ad/live/delta guards)
+  - uiInjector: showRestartButton(), cleanup() — all verified (button injection, styling, hover, click, auto-dismiss)
 
 - What is pending:
-  - Phase 8 — Restart Button (uiInjector full implementation)
   - Phase 9 — Resume Toast (optional for v1.0)
   - Phase 10 — Extension Popup
-  - Phase 11 — Integration & Hardening
+  - Phase 11 — Integration & Hardening (bootstrap.js full wiring)
   - Phase 12 — Pre-Release Polish
 
 - Known issues (if any):
   - bootstrap.js contains temporary Phase 4 verification wiring (will be replaced in Phase 11)
-  - uiInjector.js is a callable stub (logs instead of injecting button) — full implementation in Phase 8
