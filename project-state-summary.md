@@ -1,14 +1,14 @@
 PROJECT STATE SUMMARY
 =====================
 Current implementation state:
-- Phase: Phase 10 — Extension Popup (Complete)
+- Phase: Phase 11 — Integration & Hardening (Complete)
 
 - Files created so far:
   - manifest.json (MV3, content scripts in correct load order, action/popup registered, icons referenced)
   - popup/popup.html (implemented — 6 sections layout, inline confirmation panel)
   - popup/popup.css (implemented — system font stack, 280px fixed width, UI state styling)
   - popup/popup.js (implemented — storage read, inline confirmation interactions, clear action)
-  - content/bootstrap.js (temporary Phase 4 verification wiring)
+  - content/bootstrap.js (implemented — full orchestration, teardown, resume, tracking, error handling)
   - content/navigationManager.js (implemented — start, stop, SPA + cold load + fallback)
   - content/playerObserver.js (implemented — waitForVideo, isAdPlaying, disconnect)
   - content/resumeManager.js (implemented — tryResume, wired to showRestartButton + showToast)
@@ -23,7 +23,7 @@ Current implementation state:
 
 - What works:
   - Extension loads in Chrome via Load Unpacked without errors
-  - All 9 JS modules log their load message to DevTools Console
+  - All 9 JS modules load cleanly
   - youtubeUtils: isWatchPage(), getVideoId(), isShorts(), isLive() — all verified
   - timeUtils: shouldResume(), getResumeTime() — all verified
   - storageManager: getProgress(), saveProgress(), deleteProgress(), eviction — all verified
@@ -34,10 +34,10 @@ Current implementation state:
   - uiInjector: showRestartButton(), cleanup() — all verified (button injection, styling, hover, click, auto-dismiss)
   - uiInjector: showToast() — all verified (fade animation, formatTime, accessibility, DOM removal)
   - popup: layout, storage read, cross-promo links, inline confirmation, clear action — all verified
+  - bootstrap: orchestration — all verified (teardown, page check, wait -> tryResume -> startTracker, error catching)
 
 - What is pending:
-  - Phase 11 — Integration & Hardening (bootstrap.js full wiring)
   - Phase 12 — Pre-Release Polish
 
 - Known issues (if any):
-  - bootstrap.js contains temporary Phase 4 verification wiring (will be replaced in Phase 11)
+  - None
