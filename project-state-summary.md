@@ -1,16 +1,16 @@
 PROJECT STATE SUMMARY
 =====================
 Current implementation state:
-- Phase: Phase 5 — Player Observer (Complete)
+- Phase: Phase 6 — Resume Manager (Complete)
 
 - Files created so far:
   - manifest.json (MV3, content scripts in correct load order, icons referenced)
   - content/bootstrap.js (temporary Phase 4 verification wiring)
   - content/navigationManager.js (implemented — start, stop, SPA + cold load + fallback)
   - content/playerObserver.js (implemented — waitForVideo, isAdPlaying, disconnect)
-  - content/resumeManager.js (stub)
+  - content/resumeManager.js (implemented — tryResume with metadata wait, validation, delay, seek)
   - content/progressTracker.js (stub)
-  - content/uiInjector.js (stub)
+  - content/uiInjector.js (callable stub — showRestartButton, cleanup)
   - storage/storageManager.js (implemented — getProgress, saveProgress, deleteProgress, eviction)
   - utils/youtubeUtils.js (implemented — 4 functions)
   - utils/timeUtils.js (implemented — 3 constants, 2 functions)
@@ -26,11 +26,11 @@ Current implementation state:
   - storageManager: getProgress(), saveProgress(), deleteProgress(), eviction — all verified
   - navigationManager: start(), stop(), yt-navigate-finish, cold load, fallback polling — all verified
   - playerObserver: waitForVideo(), isAdPlaying(), disconnect() — all verified
+  - resumeManager: tryResume() — all verified (metadata wait, shouldResume, 400ms delay, seek, error catching)
 
 - What is pending:
-  - Phase 6 — Resume Manager
   - Phase 7 — Progress Tracker
-  - Phase 8 — Restart Button
+  - Phase 8 — Restart Button (uiInjector full implementation)
   - Phase 9 — Resume Toast (optional for v1.0)
   - Phase 10 — Extension Popup
   - Phase 11 — Integration & Hardening
@@ -38,3 +38,4 @@ Current implementation state:
 
 - Known issues (if any):
   - bootstrap.js contains temporary Phase 4 verification wiring (will be replaced in Phase 11)
+  - uiInjector.js is a callable stub (logs instead of injecting button) — full implementation in Phase 8
