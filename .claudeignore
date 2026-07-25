@@ -1,0 +1,9 @@
+.env
+.env.*
+*.pem
+*.key
+**/credentials*
+**/secrets*
+.git/
+node_modules/
+*.crx

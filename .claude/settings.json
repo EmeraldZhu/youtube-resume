@@ -1,0 +1,24 @@
+{
+  "permissions": {
+    "deny": [
+      "Edit(manifest.json)",
+      "Write(manifest.json)",
+      "Bash(npm *)",
+      "Bash(npx *)",
+      "Bash(yarn *)",
+      "Bash(pnpm *)",
+      "PowerShell(npm *)",
+      "PowerShell(npx *)",
+      "PowerShell(yarn *)",
+      "PowerShell(pnpm *)",
+      "Edit(package.json)",
+      "Write(package.json)",
+      "Edit(package-lock.json)",
+      "Write(package-lock.json)",
+      "Edit(yarn.lock)",
+      "Write(yarn.lock)",
+      "Edit(pnpm-lock.yaml)",
+      "Write(pnpm-lock.yaml)"
+    ]
+  }
+}

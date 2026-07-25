@@ -1,44 +1,51 @@
-PROJECT STATE SUMMARY
-=====================
-Current implementation state:
-- Phase: Phase 11 — Integration & Hardening (Complete)
+# Project State Summary — YouTube Resume
 
-- Files created so far:
-  - manifest.json (MV3, content scripts in correct load order, action/popup registered, icons referenced)
-  - popup/popup.html (implemented — 6 sections layout, inline confirmation panel)
-  - popup/popup.css (implemented — system font stack, 280px fixed width, UI state styling)
-  - popup/popup.js (implemented — storage read, inline confirmation interactions, clear action)
-  - content/bootstrap.js (implemented — full orchestration, teardown, resume, tracking, error handling)
-  - content/navigationManager.js (implemented — start, stop, SPA + cold load + fallback)
-  - content/playerObserver.js (implemented — waitForVideo, isAdPlaying, disconnect)
-  - content/resumeManager.js (implemented — tryResume, wired to showRestartButton + showToast)
-  - content/progressTracker.js (implemented — start, stop, interval + event tracking, guards)
-  - content/uiInjector.js (implemented — showRestartButton, showToast, cleanup)
-  - storage/storageManager.js (implemented — getProgress, saveProgress, deleteProgress, eviction)
-  - utils/youtubeUtils.js (implemented — 4 functions)
-  - utils/timeUtils.js (implemented — 3 constants, 2 functions)
-  - assets/icons/icon-16.png
-  - assets/icons/icon-48.png
-  - assets/icons/icon-128.png
+**Target:** v2.0.0 · **Live:** v1.0.0 on the Chrome Web Store (real users, real saved data)
+**Plan:** `docs/ROADMAP_v2.md` · **Decisions:** `docs/DECISIONS.md`
 
-- What works:
-  - Extension loads in Chrome via Load Unpacked without errors
-  - All 9 JS modules load cleanly
-  - youtubeUtils: isWatchPage(), getVideoId(), isShorts(), isLive() — all verified
-  - timeUtils: shouldResume(), getResumeTime() — all verified
-  - storageManager: getProgress(), saveProgress(), deleteProgress(), eviction — all verified
-  - navigationManager: start(), stop(), yt-navigate-finish, cold load, fallback polling — all verified
-  - playerObserver: waitForVideo(), isAdPlaying(), disconnect() — all verified
-  - resumeManager: tryResume() — all verified (metadata wait, shouldResume, 400ms delay, seek, error catching)
-  - progressTracker: start(), stop() — all verified (interval, pause, seeked, visibilitychange, beforeunload, ad/live/delta guards)
-  - uiInjector: showRestartButton(), cleanup() — all verified (button injection, styling, hover, click, auto-dismiss)
-  - uiInjector: showToast() — all verified (fade animation, formatTime, accessibility, DOM removal)
-  - popup: layout, storage read, cross-promo links, inline confirmation, clear action — all verified
-  - bootstrap: orchestration — all verified (teardown, page check, wait -> tryResume -> startTracker, error catching)
-  - pre-release polish: logs removed, copy audited, permissions verified — complete
+<!-- Keep this file under ~50 lines. It loads at the start of every session. -->
 
-- What is pending:
-  - None — Project complete!
+## Phase Status — v2.0.0
 
-- Known issues (if any):
-  - None
+| Phase | Name | Status | Blocked By |
+|---|---|---|---|
+| 0 | Phase 0 — Guardrails & Tracking Setup | DONE | — |
+| 1 | Reliability Audit & Instrumentation | NOT STARTED | — |
+| 2 | Resume Engine Hardening | NOT STARTED | D-017 must close |
+| 3 | Progress Tracking Hardening | NOT STARTED | — |
+| 4 | Storage Schema v2, Title Capture & Migration | NOT STARTED | — |
+| 5 | In-Player UI Re-Calibration | NOT STARTED | — |
+| 6 | Settings Store & Settings Panel | NOT STARTED | — |
+| 7 | Wire Settings Into Runtime | NOT STARTED | — |
+| 8 | Saved Videos Panel | NOT STARTED | — |
+| 9 | Integration, Regression & Store Resubmission | NOT STARTED | D-032, D-033 |
+
+**Status values:** NOT STARTED · IN PROGRESS · BLOCKED · AWAITING VERIFICATION · DONE
+
+A phase is `DONE` only when the owner has run its verification checklist and confirmed it.
+`AWAITING VERIFICATION` means the code is written but unconfirmed — **that is not done.**
+Claude Code never writes `DONE` itself.
+
+## Shipped state (v1.0.0)
+
+All 13 source files implemented and loading cleanly: 9 content/storage/utils modules, 3 popup files,
+`manifest.json`. Extension loads via Load Unpacked without errors.
+
+**Working:** navigation detection (SPA, cold load, polling fallback), player detection, storage
+read/write/delete/eviction, progress tracking (interval + events), Restart button, resume toast,
+v1.0 popup, bootstrap orchestration.
+
+**Known broken — the reason for v2.0.0:**
+- Resume fires unreliably. Root cause unconfirmed; hypotheses H1–H8 in Roadmap §4, closing via D-017.
+- Restart button and toast don't match YouTube's current UI. Toast overlaps the progress bar (D-028);
+  button is bare text among pill controls (D-027).
+- No settings, no saved-videos panel, no video titles in storage.
+
+## Next action
+
+Run the guardrails prompt, then Phase 1. Phase 1 is instrumentation only — no behaviour changes.
+
+## Doc versions
+
+PRD 2.0.0 · UX Spec 2.0.0 · Roadmap 2.0.0 · **TDD still 1.0.0** (updated per phase, reaches 2.0.0 in
+Phase 9 — see D-030; treat as stale for anything Phase 2+ has changed).
