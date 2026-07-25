@@ -1,8 +1,6 @@
 {
   "permissions": {
     "deny": [
-      "Edit(manifest.json)",
-      "Write(manifest.json)",
       "Bash(npm *)",
       "Bash(npx *)",
       "Bash(yarn *)",

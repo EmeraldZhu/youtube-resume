@@ -10,8 +10,8 @@
 | Phase | Name | Status | Blocked By |
 |---|---|---|---|
 | 0 | Phase 0 — Guardrails & Tracking Setup | DONE | — |
-| 1 | Reliability Audit & Instrumentation | NOT STARTED | — |
-| 2 | Resume Engine Hardening | NOT STARTED | D-017 must close |
+| 1 | Reliability Audit & Instrumentation | AWAITING VERIFICATION | — |
+| 2 | Resume Engine Hardening | NOT STARTED | — |
 | 3 | Progress Tracking Hardening | NOT STARTED | — |
 | 4 | Storage Schema v2, Title Capture & Migration | NOT STARTED | — |
 | 5 | In-Player UI Re-Calibration | NOT STARTED | — |
@@ -36,14 +36,17 @@ read/write/delete/eviction, progress tracking (interval + events), Restart butto
 v1.0 popup, bootstrap orchestration.
 
 **Known broken — the reason for v2.0.0:**
-- Resume fires unreliably. Root cause unconfirmed; hypotheses H1–H8 in Roadmap §4, closing via D-017.
+- Resume fires unreliably. Root cause confirmed in `docs/PHASE1_FINDINGS.md` (D-017 closed): H2/H4/
+  H6/H8 confirmed, H5 was a doc-only contradiction, plus 3 new failure modes (D-036/D-037/D-038)
+  scoped into Phase 2.
 - Restart button and toast don't match YouTube's current UI. Toast overlaps the progress bar (D-028);
   button is bare text among pill controls (D-027).
 - No settings, no saved-videos panel, no video titles in storage.
 
 ## Next action
 
-Run the guardrails prompt, then Phase 1. Phase 1 is instrumentation only — no behaviour changes.
+Owner to verify Phase 1 (see PHASE1_FINDINGS.md + this session's report), then Phase 2 —
+Resume Engine Hardening, scoped by D-019 through D-025 plus D-036/D-037/D-038.
 
 ## Doc versions
 

@@ -836,6 +836,13 @@ All persistent state lives in `chrome.storage.local` under the key `youtubeResum
 2. **Failures are silent to the user.** No alerts, toasts, or UI errors are shown for internal failures.
 3. **Failures are logged to console.** Prefixed with `[YTResume]` for easy filtering in DevTools.
 4. **Graceful degradation is always preferred.** If resume fails, tracking must still proceed. If tracking fails, the page continues to work normally.
+5. **Diagnostic tracing (Phase 1+).** `utils/debugLogger.js` exposes a module-level `DEBUG` constant
+   (default `false`) and a `log(stage, data)` helper that no-ops entirely when `DEBUG` is false, so
+   shipped behaviour is unaffected. `resumeManager`, `playerObserver`, `progressTracker`, and
+   `navigationManager` call it at key decision points (ad state, guard checks, seek verification,
+   save triggers, re-emit checks) to make reliability issues reproducible without behaviour
+   changes. Must never be committed with `DEBUG = true`; removed or reconfirmed gated in Phase 9
+   (Roadmap 9.1).
 
 ### 7.2 Failure Matrix
 

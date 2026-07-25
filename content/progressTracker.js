@@ -28,15 +28,29 @@ const progressTracker = (() => {
    * @param {boolean} bypassDelta - If true, skip the delta guard
    *   (used by pause and seeked handlers).
    */
-  function attemptSave(bypassDelta) {
+  function attemptSave(bypassDelta, trigger) {
     if (!activeVideo || !activeVideoId) return;
-    if (playerObserver.isAdPlaying()) return;
-    if (activeVideo.duration === Infinity) return; // live stream guard
+    if (playerObserver.isAdPlaying()) {
+      debugLogger.log('attemptSave:skipped', { trigger, reason: 'adPlaying' });
+      return;
+    }
+    if (activeVideo.duration === Infinity) {
+      debugLogger.log('attemptSave:skipped', { trigger, reason: 'liveStream' });
+      return; // live stream guard
+    }
 
     const current = Math.floor(activeVideo.currentTime);
     const duration = Math.floor(activeVideo.duration);
 
-    if (!bypassDelta && Math.abs(current - lastSavedTime) < 5) return; // delta guard
+    const deltaBlocked = !bypassDelta && Math.abs(current - lastSavedTime) < 5;
+    debugLogger.log('attemptSave', {
+      trigger,
+      bypassDelta: !!bypassDelta,
+      deltaBlocked,
+      current,
+      lastSavedTime,
+    });
+    if (deltaBlocked) return; // delta guard
 
     lastSavedTime = current;
     storageManager.saveProgress(activeVideoId, current, duration)
@@ -56,15 +70,15 @@ const progressTracker = (() => {
     lastSavedTime = Math.floor(video.currentTime);
 
     // Core interval — every 5 seconds
-    intervalId = setInterval(() => attemptSave(false), 5000);
+    intervalId = setInterval(() => attemptSave(false, 'interval'), 5000);
 
     // Event-based triggers
-    handlePause = () => attemptSave(true);
-    handleSeeked = () => attemptSave(true);
+    handlePause = () => attemptSave(true, 'pause');
+    handleSeeked = () => attemptSave(true, 'seeked');
     handleVisibility = () => {
-      if (document.hidden) attemptSave(true);
+      if (document.hidden) attemptSave(true, 'visibility');
     };
-    handleUnload = () => attemptSave(true);
+    handleUnload = () => attemptSave(true, 'unload');
 
     video.addEventListener('pause', handlePause);
     video.addEventListener('seeked', handleSeeked);

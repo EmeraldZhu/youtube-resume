@@ -20,9 +20,16 @@ const playerObserver = (() => {
    * or if <video> does not appear within 10 seconds.
    */
   function waitForVideo() {
+    const startTime = Date.now();
+    const container = document.querySelector('#movie_player');
+    debugLogger.log('waitForVideo:entry', { containerExists: !!container });
+
     return new Promise((resolve, reject) => {
-      const container = document.querySelector('#movie_player');
       if (!container) {
+        debugLogger.log('waitForVideo:resolved', {
+          path: 'reject-no-container',
+          elapsedMs: Date.now() - startTime,
+        });
         reject(new Error('Player container #movie_player not found'));
         return;
       }
@@ -30,6 +37,10 @@ const playerObserver = (() => {
       // Check if <video> is already present
       const existing = container.querySelector('video');
       if (existing) {
+        debugLogger.log('waitForVideo:resolved', {
+          path: 'immediate',
+          elapsedMs: Date.now() - startTime,
+        });
         resolve(existing);
         return;
       }
@@ -42,6 +53,10 @@ const playerObserver = (() => {
           observer = null;
           clearTimeout(timeoutHandle);
           timeoutHandle = null;
+          debugLogger.log('waitForVideo:resolved', {
+            path: 'observer',
+            elapsedMs: Date.now() - startTime,
+          });
           resolve(video);
         }
       });
@@ -55,6 +70,10 @@ const playerObserver = (() => {
           observer = null;
         }
         timeoutHandle = null;
+        debugLogger.log('waitForVideo:resolved', {
+          path: 'timeout',
+          elapsedMs: Date.now() - startTime,
+        });
         reject(new Error('Timeout: <video> not found after 10s'));
       }, 10000);
     });

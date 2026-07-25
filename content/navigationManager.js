@@ -21,7 +21,9 @@ const navigationManager = (() => {
    */
   function checkAndEmit() {
     const newId = youtubeUtils.getVideoId();
-    if (newId && newId !== currentVideoId) {
+    const emitted = !!(newId && newId !== currentVideoId);
+    debugLogger.log('checkAndEmit', { newId, currentVideoId, emitted });
+    if (emitted) {
       currentVideoId = newId;
       onVideoChangeCallback(newId);
       return true;

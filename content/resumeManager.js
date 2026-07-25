@@ -53,34 +53,78 @@ const resumeManager = (() => {
    * @param {string} videoId
    */
   async function tryResume(video, saved, videoId) {
+    debugLogger.log('tryResume:entry', {
+      videoId,
+      savedTime: saved.time,
+      videoDurationAtEntry: video.duration,
+    });
+
     // Wait for duration to be available
+    let metadataWaitOccurred = false;
     if (!video.duration || isNaN(video.duration)) {
+      metadataWaitOccurred = true;
       try {
         await waitForMetadata(video);
       } catch (err) {
         console.warn('[YTResume] Metadata wait failed:', err.message);
+        debugLogger.log('tryResume:metadataWaitFailed', { error: err.message });
         return;
       }
     }
+    debugLogger.log('tryResume:metadataWait', {
+      occurred: metadataWaitOccurred,
+      videoDuration: video.duration,
+    });
 
     // Validate resume conditions
-    if (!timeUtils.shouldResume(saved.time, video.duration)) {
+    const shouldResumeResult = timeUtils.shouldResume(saved.time, video.duration);
+    debugLogger.log('tryResume:shouldResume', {
+      result: shouldResumeResult,
+      savedTime: saved.time,
+      duration: video.duration,
+    });
+    if (!shouldResumeResult) {
       return; // Conditions not met — exit silently
     }
+
+    debugLogger.log('tryResume:isAdPlaying:beforeDelay', {
+      isAdPlaying: playerObserver.isAdPlaying(),
+      currentTime: video.currentTime,
+    });
 
     // Buffer for YouTube player initialization race
     await delay(RESUME_DELAY_MS);
 
+    debugLogger.log('tryResume:isAdPlaying:afterDelay', {
+      isAdPlaying: playerObserver.isAdPlaying(),
+      currentTime: video.currentTime,
+    });
+
     // Guard: if user has already manually seeked during delay, abort
-    if (video.currentTime > 5) return;
+    const guardAborted = video.currentTime > 5;
+    debugLogger.log('tryResume:guardCheck', {
+      currentTime: video.currentTime,
+      aborted: guardAborted,
+    });
+    if (guardAborted) return;
 
     const resumeTime = timeUtils.getResumeTime(saved.time);
+    debugLogger.log('tryResume:resumeTime', { resumeTime });
 
     try {
       video.currentTime = resumeTime;
     } catch (err) {
       console.warn('[YTResume] Seek failed:', err.message);
+      debugLogger.log('tryResume:seekFailed', { error: err.message });
       return;
+    }
+
+    debugLogger.log('tryResume:afterAssign', { currentTime: video.currentTime });
+
+    if (debugLogger.DEBUG) {
+      setTimeout(() => {
+        debugLogger.log('tryResume:after1000ms', { currentTime: video.currentTime });
+      }, 1000);
     }
 
     uiInjector.showRestartButton(video, videoId);

@@ -13,6 +13,7 @@
       "matches": ["https://www.youtube.com/*"],
       "js": [
         "storage/storageManager.js",
+        "utils/debugLogger.js",
         "utils/youtubeUtils.js",
         "utils/timeUtils.js",
         "content/playerObserver.js",

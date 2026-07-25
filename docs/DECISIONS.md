@@ -46,8 +46,11 @@ that made it. A decision that exists only in a chat report is lost when the sess
 
 | ID | Decision | Status | Owner | Implement In | Notes |
 |----|----------|--------|-------|--------------|-------|
-| D-017 | Confirm which of hypotheses H1–H8 actually cause unreliable resume before fixing anything | **OPEN** | Claude | Phase 1 | Roadmap §4. Output is `docs/PHASE1_FINDINGS.md`. **Phase 2 cannot be scoped until this closes.** |
-| D-018 | If Phase 1 finds failure modes outside H1–H8, Phase 2 scope expands to cover them | OPEN | Claude | Phase 2 | Decide autonomously; log each new fix as its own row. |
+| D-017 | Confirm which of hypotheses H1–H8 actually cause unreliable resume before fixing anything | DONE | Claude | Phase 1 | `docs/PHASE1_FINDINGS.md`. H2/H4/H6/H8 confirmed; H5 not reproduced (TDD doc issue only); H1 confirmed via a different trigger than described (see D-036); H3/H7 confirmed by code but not reproducible live this session; H1's ad case and H3's throttled case untested (S4, see Notes). |
+| D-018 | If Phase 1 finds failure modes outside H1–H8, Phase 2 scope expands to cover them | APPROVED (Claude) | Claude | Phase 2 | Expands per D-036/D-037/D-038 below. |
+| D-036 | Phase 2 must fix navigationManager/bootstrap teardown gap: leaving a watch page for a non-watch page never emits, so progressTracker/uiInjector/playerObserver teardown never runs | APPROVED (Claude) | Claude | Phase 2 | Phase 1 Finding A. Live evidence: stale 5s interval kept firing against a torn-down video after navigating to the YouTube homepage. |
+| D-037 | Phase 2's ad/guard redesign (D-019/D-021) must also account for YouTube's own native resume moving `currentTime` before the 400ms delay elapses, independent of ads | APPROVED (Claude) | Claude | Phase 2 | Phase 1 Finding B. On a signed-in account this trips the same `currentTime > 5` guard as an ad would, on nearly every repeat view, meaning this extension's own seek/toast/restart-button rarely execute even though the video lands in the right place. |
+| D-038 | `waitForMetadata`'s 5s timeout is reachable under ordinary (non-throttled) network conditions and silently skips resume; Phase 2 should reassess the timeout or add a retry | APPROVED (Claude) | Claude | Phase 2 | Phase 1 Finding C. Observed ~1 in 10 cold loads of the same video in this session. |
 | D-019 | Resume is ad-gated: defer until `.ad-showing` and `.ad-interrupting` both clear | APPROVED | Human | Phase 2 | PRD §5.7 required this in v1.0; the v1.0 TDD omitted it, so it was never built. |
 | D-020 | Ad wait has a 60-second hard ceiling, then abandons cleanly | APPROVED | Claude | Phase 2 | Tier 2 value pick. Prevents an unbounded wait. |
 | D-021 | Replace the `currentTime > 5` abort guard with a pre-delay comparison, 10s drift tolerance | APPROVED | Claude | Phase 2 | The old guard read *ad* position, silently cancelling resume on any ad over 5s. |
@@ -80,6 +83,7 @@ that made it. A decision that exists only in a chat report is lost when the sess
 | ID | Decision | Status | Owner | Implement In | Notes |
 |----|----------|--------|-------|--------------|-------|
 | D-035 | `.claude/settings.json` deny list widened beyond `install` subcommands to all of `npm`/`npx`/`yarn`/`pnpm` (Bash and PowerShell), plus writes to `package.json`/lockfiles | APPROVED (Claude) | Claude | Guardrails | Zero-dependency, no-build-step project (CLAUDE.md) — blocking only `install` still permits `npm run`/`npx <tool>` or a hand-authored `package.json` to introduce a build step by the back door. |
+| D-039 | `Edit(manifest.json)` / `Write(manifest.json)` deny rule removed from `.claude/settings.json` | APPROVED (Human) | Human | Phase 1 | Owner explicitly overruled the guardrail mid-Phase-1 to let Claude wire `utils/debugLogger.js` into the content-script load order. The rule blocked all manifest edits unconditionally (not just `permissions`/`host_permissions`, which is what S1 actually protects); removing it doesn't relax S1 itself — permission/host_permission changes still require a STOP. |
 
 ---
 
