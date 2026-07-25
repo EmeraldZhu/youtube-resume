@@ -16,14 +16,18 @@ const navigationManager = (() => {
   let navigationHandler = null;
 
   /**
-   * Attempts to extract the current videoId and emit if it has changed.
-   * Returns true if a new videoId was emitted, false otherwise.
+   * Attempts to extract the current videoId and emit if it has changed,
+   * including transitions to/from a non-watch page (newId === null).
+   * Emitting null on leaving a watch page drives bootstrap's teardown path
+   * (D-036); resetting currentVideoId to null on that same transition means
+   * returning to the same video later is seen as a change too (D-036/H8).
+   * Returns true if a change was emitted, false otherwise.
    */
   function checkAndEmit() {
     const newId = youtubeUtils.getVideoId();
-    const emitted = !!(newId && newId !== currentVideoId);
-    debugLogger.log('checkAndEmit', { newId, currentVideoId, emitted });
-    if (emitted) {
+    const changed = newId !== currentVideoId;
+    debugLogger.log('checkAndEmit', { newId, currentVideoId, changed });
+    if (changed) {
       currentVideoId = newId;
       onVideoChangeCallback(newId);
       return true;

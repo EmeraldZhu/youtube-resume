@@ -10,6 +10,13 @@
 
 const resumeManager = (() => {
   const RESUME_DELAY_MS = 400;
+  const AD_WAIT_CEILING_MS = 60000; // D-020
+  const AD_POLL_MS = 250;
+  const AD_ROUND_MAX_ATTEMPTS = 3; // Tier 2 pick — bounds the ad-reappears-mid-delay loop
+  const DRIFT_TOLERANCE_S = 10; // D-021
+  const SEEK_VERIFY_DELAY_MS = 250; // D-022
+  const SEEK_TOLERANCE_S = 3; // D-022
+  const SEEK_MAX_ATTEMPTS = 3; // D-022
 
   /**
    * Returns a Promise that resolves when video.duration is a
@@ -45,6 +52,54 @@ const resumeManager = (() => {
   }
 
   /**
+   * Polls isAdPlaying() until it clears or AD_WAIT_CEILING_MS elapses.
+   * Resolves true if the ad cleared, false if the ceiling was hit
+   * (D-020 — abandon cleanly, never wait unbounded).
+   */
+  function waitForAdClear() {
+    const start = Date.now();
+    return new Promise((resolve) => {
+      function poll() {
+        if (!playerObserver.isAdPlaying()) {
+          resolve(true);
+          return;
+        }
+        if (Date.now() - start >= AD_WAIT_CEILING_MS) {
+          resolve(false);
+          return;
+        }
+        setTimeout(poll, AD_POLL_MS);
+      }
+      poll();
+    });
+  }
+
+  /**
+   * Assigns video.currentTime = resumeTime, then re-reads after
+   * SEEK_VERIFY_DELAY_MS. Re-assigns if off by more than SEEK_TOLERANCE_S,
+   * up to SEEK_MAX_ATTEMPTS (D-022). Never an unbounded retry loop.
+   */
+  async function seekWithVerification(video, resumeTime) {
+    for (let attempt = 1; attempt <= SEEK_MAX_ATTEMPTS; attempt++) {
+      try {
+        video.currentTime = resumeTime;
+      } catch (err) {
+        console.warn('[YTResume] Seek failed:', err.message);
+        debugLogger.log('tryResume:seekFailed', { attempt, error: err.message });
+        return false;
+      }
+
+      await delay(SEEK_VERIFY_DELAY_MS);
+      const drift = Math.abs(video.currentTime - resumeTime);
+      debugLogger.log('tryResume:seekVerify', { attempt, currentTime: video.currentTime, drift });
+      if (drift <= SEEK_TOLERANCE_S) {
+        return true;
+      }
+    }
+    return false;
+  }
+
+  /**
    * Validates saved progress against resume conditions and
    * executes the seek if conditions are met.
    *
@@ -59,16 +114,22 @@ const resumeManager = (() => {
       videoDurationAtEntry: video.duration,
     });
 
-    // Wait for duration to be available
+    // Wait for duration to be available. D-038: the 5s timeout is reachable
+    // under ordinary (non-throttled) conditions, so retry once before giving up.
     let metadataWaitOccurred = false;
     if (!video.duration || isNaN(video.duration)) {
       metadataWaitOccurred = true;
       try {
         await waitForMetadata(video);
       } catch (err) {
-        console.warn('[YTResume] Metadata wait failed:', err.message);
-        debugLogger.log('tryResume:metadataWaitFailed', { error: err.message });
-        return;
+        debugLogger.log('tryResume:metadataWaitFailed:retry', { error: err.message });
+        try {
+          await waitForMetadata(video);
+        } catch (err2) {
+          console.warn('[YTResume] Metadata wait failed:', err2.message);
+          debugLogger.log('tryResume:metadataWaitFailed', { error: err2.message });
+          return;
+        }
       }
     }
     debugLogger.log('tryResume:metadataWait', {
@@ -87,23 +148,59 @@ const resumeManager = (() => {
       return; // Conditions not met — exit silently
     }
 
-    debugLogger.log('tryResume:isAdPlaying:beforeDelay', {
+    debugLogger.log('tryResume:isAdPlaying:beforeWait', {
       isAdPlaying: playerObserver.isAdPlaying(),
       currentTime: video.currentTime,
     });
 
-    // Buffer for YouTube player initialization race
-    await delay(RESUME_DELAY_MS);
+    // D-019/PRD §5.7: defer until no ad is present, including an ad that
+    // starts mid-delay — loop back to the ad wait rather than evaluate the
+    // guard against a stale pre-ad baseline. AD_ROUND_MAX_ATTEMPTS bounds it
+    // so a pathologically ad-heavy load can't loop forever (Tier 2 pick).
+    let preDelayTime;
+    let round = 0;
+    for (;;) {
+      if (playerObserver.isAdPlaying()) {
+        const adCleared = await waitForAdClear();
+        debugLogger.log('tryResume:adWait', { cleared: adCleared });
+        if (!adCleared) {
+          console.warn('[YTResume] Resume abandoned: ad did not clear within 60s');
+          return;
+        }
+      }
 
-    debugLogger.log('tryResume:isAdPlaying:afterDelay', {
-      isAdPlaying: playerObserver.isAdPlaying(),
-      currentTime: video.currentTime,
-    });
+      // D-021: baseline currentTime immediately before the delay, not after —
+      // the guard below measures drift from here, not an absolute threshold.
+      preDelayTime = video.currentTime;
 
-    // Guard: if user has already manually seeked during delay, abort
-    const guardAborted = video.currentTime > 5;
+      // Buffer for YouTube player initialization race
+      await delay(RESUME_DELAY_MS);
+
+      debugLogger.log('tryResume:isAdPlaying:afterDelay', {
+        isAdPlaying: playerObserver.isAdPlaying(),
+        currentTime: video.currentTime,
+      });
+
+      if (!playerObserver.isAdPlaying()) break;
+
+      round += 1;
+      debugLogger.log('tryResume:adDuringDelay', { round });
+      if (round >= AD_ROUND_MAX_ATTEMPTS) {
+        console.warn('[YTResume] Resume abandoned: ad kept reappearing during resume delay');
+        return;
+      }
+      // loop: re-defer to the ad wait, then re-baseline preDelayTime
+    }
+
+    // Guard: abort only on genuine user seek — natural playback drift during
+    // the delay (D-037: including YouTube's own native resume landing near
+    // the saved position) must not trip this.
+    const driftLimit = preDelayTime + RESUME_DELAY_MS / 1000 + DRIFT_TOLERANCE_S;
+    const guardAborted = video.currentTime > driftLimit;
     debugLogger.log('tryResume:guardCheck', {
       currentTime: video.currentTime,
+      preDelayTime,
+      driftLimit,
       aborted: guardAborted,
     });
     if (guardAborted) return;
@@ -111,15 +208,11 @@ const resumeManager = (() => {
     const resumeTime = timeUtils.getResumeTime(saved.time);
     debugLogger.log('tryResume:resumeTime', { resumeTime });
 
-    try {
-      video.currentTime = resumeTime;
-    } catch (err) {
-      console.warn('[YTResume] Seek failed:', err.message);
-      debugLogger.log('tryResume:seekFailed', { error: err.message });
-      return;
+    const seekOk = await seekWithVerification(video, resumeTime);
+    if (!seekOk) {
+      console.warn('[YTResume] Seek could not be verified after 3 attempts');
+      debugLogger.log('tryResume:seekUnverified', { currentTime: video.currentTime });
     }
-
-    debugLogger.log('tryResume:afterAssign', { currentTime: video.currentTime });
 
     if (debugLogger.DEBUG) {
       setTimeout(() => {

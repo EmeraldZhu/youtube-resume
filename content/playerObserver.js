@@ -15,27 +15,25 @@ const playerObserver = (() => {
   let timeoutHandle = null;
 
   /**
-   * Returns a Promise that resolves with the <video> element
-   * inside #movie_player. Rejects if #movie_player is not found
-   * or if <video> does not appear within 10 seconds.
+   * Returns a Promise that resolves with the <video> element inside
+   * #movie_player. Observes document.body until #movie_player itself
+   * appears (v1.0 rejected immediately in this case, guaranteeing a missed
+   * resume on slow cold loads — D-023), then resolves once <video> shows up
+   * inside it. Rejects only on the overall 10-second timeout.
    */
   function waitForVideo() {
     const startTime = Date.now();
-    const container = document.querySelector('#movie_player');
-    debugLogger.log('waitForVideo:entry', { containerExists: !!container });
+    debugLogger.log('waitForVideo:entry', {
+      containerExists: !!document.querySelector('#movie_player'),
+    });
 
     return new Promise((resolve, reject) => {
-      if (!container) {
-        debugLogger.log('waitForVideo:resolved', {
-          path: 'reject-no-container',
-          elapsedMs: Date.now() - startTime,
-        });
-        reject(new Error('Player container #movie_player not found'));
-        return;
-      }
+      const resolveVideo = () => {
+        const container = document.querySelector('#movie_player');
+        return container ? container.querySelector('video') : null;
+      };
 
-      // Check if <video> is already present
-      const existing = container.querySelector('video');
+      const existing = resolveVideo();
       if (existing) {
         debugLogger.log('waitForVideo:resolved', {
           path: 'immediate',
@@ -45,9 +43,10 @@ const playerObserver = (() => {
         return;
       }
 
-      // Observe for <video> appearing asynchronously
+      // Observe document.body broadly: covers both #movie_player not yet
+      // existing and <video> not yet existing inside it.
       observer = new MutationObserver(() => {
-        const video = container.querySelector('video');
+        const video = resolveVideo();
         if (video) {
           observer.disconnect();
           observer = null;
@@ -61,7 +60,7 @@ const playerObserver = (() => {
         }
       });
 
-      observer.observe(container, { childList: true, subtree: true });
+      observer.observe(document.body, { childList: true, subtree: true });
 
       // Timeout after 10 seconds
       timeoutHandle = setTimeout(() => {

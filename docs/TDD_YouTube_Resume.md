@@ -219,7 +219,8 @@ None. This module is self-executing on load.
 // Pseudo-implementation
 function init() {
   navigationManager.start((videoId) => {
-    // Teardown previous session
+    // videoId may be null (Phase 2, D-036) — e.g. leaving a watch page.
+    // Teardown previous session runs regardless; isWatchPage() below exits early in that case.
     progressTracker.stop();
     uiInjector.cleanup();
     playerObserver.disconnect();
@@ -253,12 +254,13 @@ init();
 
 ### 4.2 `navigationManager.js`
 
-**Purpose:** Detect YouTube SPA navigation events and emit a normalized `videoChange` callback.
+**Purpose:** Detect YouTube SPA navigation events and emit a normalized `videoChange` callback,
+including transitions to and from a non-watch page.
 
 #### Public API
 
 ```typescript
-navigationManager.start(onVideoChange: (videoId: string) => void): void
+navigationManager.start(onVideoChange: (videoId: string | null) => void): void
 navigationManager.stop(): void
 ```
 
@@ -271,33 +273,43 @@ let fallbackPollInterval: number | null = null;
 
 #### Detailed Logic
 
-**Primary detection — `yt-navigate-finish`:**
+**Rewritten Phase 2 (D-036 — fixes Finding A/leaving-a-watch-page teardown and H8/same-video
+re-entry with one change):** emit whenever `getVideoId()` differs from `currentVideoId`,
+including the `null` case, rather than only when the new id is truthy.
 
 ```javascript
-document.addEventListener('yt-navigate-finish', () => {
+function checkAndEmit() {
   const newId = youtubeUtils.getVideoId();
-  if (newId && newId !== currentVideoId) {
+  if (newId !== currentVideoId) {
     currentVideoId = newId;
-    onVideoChange(newId);
+    onVideoChange(newId); // may be null — bootstrap's teardown runs either way
+    return true;
   }
-});
+  return false;
+}
 ```
+
+Leaving a watch page sets `currentVideoId` to `null` and calls `onVideoChange(null)`, which
+drives `bootstrap.onVideoChange`'s existing teardown (`progressTracker.stop()`,
+`uiInjector.cleanup()`, `playerObserver.disconnect()`) before its `isWatchPage()` check exits
+early. Because `currentVideoId` is `null` at that point, returning to the *same* video later is
+also seen as a change and re-emits — no special-case code needed for H8.
+
+**Primary detection — `yt-navigate-finish`:** calls `checkAndEmit()` on every event.
 
 **Fallback detection — URL polling:**
 
-Used only if `yt-navigate-finish` does not fire within 2 seconds of a detected URL change. This accounts for potential future YouTube structural changes.
-
-```javascript
-// Poll every 1000ms; compare window.location.href
-// If videoId changes and yt-navigate-finish has not already fired for this ID → emit
-```
+Polls every 1000ms, comparing `window.location.href`. Catches edge cases where
+`yt-navigate-finish` does not fire (not a 2-second-delayed fallback — it runs continuously
+alongside the event listener; `checkAndEmit()`'s own `currentVideoId` comparison makes a
+duplicate call from both paths a no-op).
 
 **Initial load handling:**
 
-On `start()`, check immediately if the current page is already a watch page (cold load directly to a video URL). If so, emit `onVideoChange` immediately with the current `videoId`.
+On `start()`, `checkAndEmit()` runs immediately — if already on a watch page (cold load directly
+to a video URL), this emits with the current `videoId`.
 
 #### Error Behavior
-- If `getVideoId()` returns null (non-watch page), do not emit — silently skip
 - `stop()` must remove all event listeners and clear poll interval
 
 ---
@@ -323,23 +335,24 @@ let timeoutHandle: number | null = null;
 
 #### Detailed Logic
 
-**`waitForVideo()`:**
+**`waitForVideo()`:** (rewritten Phase 2, D-023 — v1.0 rejected immediately if
+`#movie_player` was absent, guaranteeing a missed resume on slow cold loads)
 
 ```javascript
 function waitForVideo(): Promise<HTMLVideoElement> {
   return new Promise((resolve, reject) => {
-    const container = document.querySelector('#movie_player');
-    if (!container) {
-      reject(new Error('Player container #movie_player not found'));
-      return;
-    }
+    const resolveVideo = () => {
+      const container = document.querySelector('#movie_player');
+      return container ? container.querySelector('video') : null;
+    };
 
-    // Check if already present
-    const existing = container.querySelector('video');
+    const existing = resolveVideo();
     if (existing) { resolve(existing); return; }
 
+    // Observe document.body broadly: covers #movie_player not existing yet
+    // and <video> not existing inside it yet, with one observer.
     observer = new MutationObserver(() => {
-      const video = container.querySelector('video');
+      const video = resolveVideo();
       if (video) {
         observer.disconnect();
         clearTimeout(timeoutHandle);
@@ -347,7 +360,7 @@ function waitForVideo(): Promise<HTMLVideoElement> {
       }
     });
 
-    observer.observe(container, { childList: true, subtree: true });
+    observer.observe(document.body, { childList: true, subtree: true });
 
     timeoutHandle = setTimeout(() => {
       observer.disconnect();
@@ -373,8 +386,8 @@ function isAdPlaying(): boolean {
 Disconnects the `MutationObserver` and cancels the timeout. Safe to call even if already disconnected.
 
 #### Error Behavior
-- If `#movie_player` is not found in the DOM, reject immediately with a descriptive error
-- Timeout rejection bubbles up to `bootstrap.js` catch handler
+- If `#movie_player` is not yet in the DOM, keep observing `document.body` — do not reject (D-023)
+- Only the overall 10s timeout rejects; rejection bubbles up to `bootstrap.js` catch handler
 
 ---
 
@@ -396,37 +409,68 @@ resumeManager.tryResume(
 
 ```typescript
 const RESUME_DELAY_MS = 400;
+const AD_WAIT_CEILING_MS = 60000;   // D-020
+const AD_POLL_MS = 250;
+const AD_ROUND_MAX_ATTEMPTS = 3;    // bounds the ad-reappears-mid-delay loop below
+const DRIFT_TOLERANCE_S = 10;       // D-021
+const SEEK_VERIFY_DELAY_MS = 250;   // D-022
+const SEEK_TOLERANCE_S = 3;         // D-022
+const SEEK_MAX_ATTEMPTS = 3;        // D-022
 ```
 
 #### Detailed Logic
 
+Rewritten Phase 2 (D-019 through D-022, D-038). Order of operations:
+
 ```javascript
 async function tryResume(video, saved, videoId) {
-  // Wait for duration to be available
+  // Wait for duration to be available; one retry on timeout (D-038 — the 5s
+  // timeout is reachable on ordinary connections, not just throttled ones)
   if (!video.duration || isNaN(video.duration)) {
-    await waitForMetadata(video); // resolves on 'loadedmetadata'
+    try {
+      await waitForMetadata(video);
+    } catch {
+      await waitForMetadata(video); // second and final attempt
+    }
   }
 
   if (!timeUtils.shouldResume(saved.time, video.duration)) {
     return; // Conditions not met — exit silently
   }
 
-  // Buffer for YouTube player initialization race
-  await delay(RESUME_DELAY_MS);
+  // D-019/PRD §5.7: defer until no ad is present, including an ad that starts
+  // mid-delay — loop back to the ad wait rather than evaluate the guard
+  // against a stale pre-ad baseline. Bounded by AD_ROUND_MAX_ATTEMPTS.
+  let preDelayTime;
+  for (let round = 0; ; round++) {
+    if (playerObserver.isAdPlaying()) {
+      const cleared = await waitForAdClear(); // polls isAdPlaying(), AD_WAIT_CEILING_MS cap
+      if (!cleared) return; // abandon cleanly, log warning
+    }
 
-  // Guard: if user has already manually seeked during delay, abort
-  if (video.currentTime > 5) return;
+    // D-021: baseline before the delay — the guard measures drift from here
+    preDelayTime = video.currentTime;
+    await delay(RESUME_DELAY_MS);
+
+    if (!playerObserver.isAdPlaying()) break;
+    if (round + 1 >= AD_ROUND_MAX_ATTEMPTS) return; // abandon cleanly, log warning
+    // else loop: re-defer to the ad wait, then re-baseline preDelayTime
+  }
+
+  // Guard: abort only on genuine user seek. Natural playback drift, and
+  // YouTube's own native resume landing near the saved position (D-037),
+  // must not trip this.
+  const driftLimit = preDelayTime + RESUME_DELAY_MS / 1000 + DRIFT_TOLERANCE_S;
+  if (video.currentTime > driftLimit) return;
 
   const resumeTime = timeUtils.getResumeTime(saved.time);
 
-  try {
-    video.currentTime = resumeTime;
-  } catch (err) {
-    console.warn('[YTResume] Seek failed:', err.message);
-    return;
-  }
+  // D-022: verified seek, bounded retry
+  const ok = await seekWithVerification(video, resumeTime);
+  if (!ok) console.warn('[YTResume] Seek could not be verified after 3 attempts');
 
   uiInjector.showRestartButton(video, videoId);
+  uiInjector.showToast(resumeTime);
 }
 ```
 
@@ -436,9 +480,24 @@ async function tryResume(video, saved, videoId) {
 // Listens for 'loadedmetadata' event with a 5s timeout fallback
 ```
 
+**`waitForAdClear()`:**
+```javascript
+// Polls playerObserver.isAdPlaying() every AD_POLL_MS.
+// Resolves true once clear, false if AD_WAIT_CEILING_MS elapses first.
+```
+
+**`seekWithVerification(video, resumeTime)`:**
+```javascript
+// Assigns video.currentTime, waits SEEK_VERIFY_DELAY_MS, re-reads.
+// Re-assigns if drift > SEEK_TOLERANCE_S, up to SEEK_MAX_ATTEMPTS.
+// Returns true if verified within tolerance, false otherwise.
+```
+
 #### Error Behavior
-- If `video.currentTime` assignment throws, catch and log — do not inject Restart button
-- If metadata never loads (5s timeout), skip resume for this video
+- If `video.currentTime` assignment throws mid-verification, catch, log, stop retrying — do not inject Restart button
+- If metadata never loads after two attempts (~10s total), skip resume for this video
+- If an ad never clears within 60s, skip resume for this video
+- Seek verification failing after 3 attempts logs a warning but still shows the Restart button/toast — best-effort seek already occurred
 
 ---
 
@@ -848,14 +907,19 @@ All persistent state lives in `chrome.storage.local` under the key `youtubeResum
 
 | Failure | Module | Behavior |
 |---|---|---|
-| `#movie_player` not found | `playerObserver` | Reject promise; log warning; bootstrap skips resume + tracking |
+| `#movie_player` not yet in DOM | `playerObserver` | Observe `document.body` until it appears (D-023); only the 10s overall timeout rejects |
 | `<video>` not detected within 10s | `playerObserver` | Reject with timeout error; bootstrap skips gracefully |
+| Ad active when resume would start | `resumeManager` | Defer seek until ad clears; 60s ceiling then abandon cleanly (D-019/D-020) |
+| Ad starts during the 400ms delay | `resumeManager` | Re-defer to the ad wait and re-baseline, rather than evaluate the drift guard against a stale baseline; abandons only after 3 such rounds |
 | `chrome.storage.local.get` fails | `storageManager` | Reject; caller skips resume (no saved data treated as absent) |
 | `chrome.storage.local.set` fails | `storageManager` | Reject; progressTracker logs and continues — data loss acceptable |
 | `video.currentTime` assignment throws | `resumeManager` | Catch; skip Restart button injection; log warning |
-| `video.duration` is NaN or 0 | `resumeManager` | Wait for `loadedmetadata`; timeout 5s; skip if unresolved |
+| Seek lands >3s off target after 3 attempts | `resumeManager` | Log warning; still shows Restart button/toast (D-022) |
+| `video.duration` is NaN or 0 | `resumeManager` | Wait for `loadedmetadata`; 5s timeout, one retry (~10s total); skip if still unresolved (D-038) |
 | `.ytp-time-display` not in DOM | `uiInjector` | Log warning; skip injection; resume still occurred |
-| `yt-navigate-finish` never fires | `navigationManager` | Fallback URL polling activates after 2s |
+| `yt-navigate-finish` never fires | `navigationManager` | Fallback URL polling activates after 1s |
+| Leaving a watch page for a non-watch page | `navigationManager` | Emits `null`; bootstrap tears down tracking/UI/observer (D-036) |
+| Returning to the same video after leaving | `navigationManager` | Re-emits (currentVideoId was reset to `null` on leaving); bootstrap re-initializes (D-036) |
 | Rapid successive navigations | `bootstrap` | Each navigation calls teardown before init; last navigation wins |
 
 ---
