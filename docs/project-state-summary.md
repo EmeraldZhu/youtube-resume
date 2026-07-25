@@ -10,7 +10,7 @@
 | Phase | Name | Status | Blocked By |
 |---|---|---|---|
 | 0 | Phase 0 — Guardrails & Tracking Setup | DONE | — |
-| 1 | Reliability Audit & Instrumentation | AWAITING VERIFICATION | — |
+| 1 | Reliability Audit & Instrumentation | DONE | — |
 | 2 | Resume Engine Hardening | NOT STARTED | — |
 | 3 | Progress Tracking Hardening | NOT STARTED | — |
 | 4 | Storage Schema v2, Title Capture & Migration | NOT STARTED | — |
