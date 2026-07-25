@@ -11,7 +11,7 @@
 |---|---|---|---|
 | 0 | Phase 0 — Guardrails & Tracking Setup | DONE | — |
 | 1 | Reliability Audit & Instrumentation | DONE | — |
-| 2 | Resume Engine Hardening | AWAITING VERIFICATION | — |
+| 2 | Resume Engine Hardening | DONE | — |
 | 3 | Progress Tracking Hardening | NOT STARTED | — |
 | 4 | Storage Schema v2, Title Capture & Migration | NOT STARTED | — |
 | 5 | In-Player UI Re-Calibration | NOT STARTED | — |
@@ -35,20 +35,20 @@ All 13 source files implemented and loading cleanly: 9 content/storage/utils mod
 read/write/delete/eviction, progress tracking (interval + events), Restart button, resume toast,
 v1.0 popup, bootstrap orchestration.
 
-**Known broken — the reason for v2.0.0:**
-- Resume reliability fixes are built (Phase 2, awaiting owner verification): ad-aware resume with
-  60s ceiling (D-019/D-020), drift-based guard replacing `currentTime > 5` (D-021/D-037),
-  verified/retried seek (D-022), non-rejecting `waitForVideo()` (D-023), navigation teardown +
-  same-video re-entry fix (D-036), metadata-wait retry (D-038). H6 (no `ended` handler) remains,
-  deferred to Phase 3 per roadmap scope.
+**Known broken — remaining reasons for v2.0.0:**
+- Resume reliability (Phase 2) is fixed and owner-verified: ad-aware resume with 60s ceiling
+  (D-019/D-020/D-040), drift-based guard replacing `currentTime > 5` (D-021/D-037), verified/retried
+  seek gated to a real UI, not a best-effort one (D-022/D-041), non-rejecting `waitForVideo()`
+  (D-023), navigation teardown + same-video re-entry fix (D-036), metadata-wait retry (D-038).
+  H6 (no `ended` handler) remains, deferred to Phase 3 per roadmap scope.
 - Restart button and toast don't match YouTube's current UI. Toast overlaps the progress bar (D-028);
   button is bare text among pill controls (D-027).
 - No settings, no saved-videos panel, no video titles in storage.
 
 ## Next action
 
-Owner to verify Phase 2 (see checklist in session report), then Phase 3 — Progress Tracking
-Hardening, scoped by D-024/D-025.
+Phase 3 — Progress Tracking Hardening, scoped by D-024/D-025 plus H6 (no `ended` handler,
+Phase 1 Finding, deferred here).
 
 ## Doc versions
 
