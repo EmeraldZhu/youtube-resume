@@ -18,15 +18,19 @@ const progressTracker = (() => {
   // Bound handler references for proper removal
   let handlePause = null;
   let handleSeeked = null;
+  let handleEnded = null;
   let handleVisibility = null;
-  let handleUnload = null;
+  let handlePagehide = null;
 
   /**
    * Core save logic with guards.
-   * Skips save if: ad playing, live stream, or delta < 5.
+   * Skips save if: ad playing, live stream, invalid position, or
+   * (interval trigger only) delta < 5.
    *
-   * @param {boolean} bypassDelta - If true, skip the delta guard
-   *   (used by pause and seeked handlers).
+   * @param {boolean} bypassDelta - If true, skip the delta guard.
+   *   Only the interval trigger passes false (D-024); every event
+   *   trigger (pause/seeked/ended/visibilitychange/pagehide) saves
+   *   unconditionally.
    */
   function attemptSave(bypassDelta, trigger) {
     if (!activeVideo || !activeVideoId) return;
@@ -42,6 +46,11 @@ const progressTracker = (() => {
     const current = Math.floor(activeVideo.currentTime);
     const duration = Math.floor(activeVideo.duration);
 
+    if (Number.isNaN(current) || current < 0 || current > duration) {
+      debugLogger.log('attemptSave:skipped', { trigger, reason: 'invalidPosition', current, duration });
+      return; // invalid position guard
+    }
+
     const deltaBlocked = !bypassDelta && Math.abs(current - lastSavedTime) < 5;
     debugLogger.log('attemptSave', {
       trigger,
@@ -50,7 +59,7 @@ const progressTracker = (() => {
       current,
       lastSavedTime,
     });
-    if (deltaBlocked) return; // delta guard
+    if (deltaBlocked) return; // delta guard — interval trigger only (D-024)
 
     lastSavedTime = current;
     storageManager.saveProgress(activeVideoId, current, duration)
@@ -72,18 +81,22 @@ const progressTracker = (() => {
     // Core interval — every 5 seconds
     intervalId = setInterval(() => attemptSave(false, 'interval'), 5000);
 
-    // Event-based triggers
+    // Event-based triggers — all save unconditionally (D-024)
     handlePause = () => attemptSave(true, 'pause');
     handleSeeked = () => attemptSave(true, 'seeked');
+    handleEnded = () => attemptSave(true, 'ended');
     handleVisibility = () => {
       if (document.hidden) attemptSave(true, 'visibility');
     };
-    handleUnload = () => attemptSave(true, 'unload');
+    // pagehide, not beforeunload (D-025) — best-effort, chrome.storage.local
+    // cannot save synchronously during teardown.
+    handlePagehide = () => attemptSave(true, 'pagehide');
 
     video.addEventListener('pause', handlePause);
     video.addEventListener('seeked', handleSeeked);
+    video.addEventListener('ended', handleEnded);
     document.addEventListener('visibilitychange', handleVisibility);
-    window.addEventListener('beforeunload', handleUnload);
+    window.addEventListener('pagehide', handlePagehide);
   }
 
   /**
@@ -100,14 +113,16 @@ const progressTracker = (() => {
     if (activeVideo) {
       if (handlePause) activeVideo.removeEventListener('pause', handlePause);
       if (handleSeeked) activeVideo.removeEventListener('seeked', handleSeeked);
+      if (handleEnded) activeVideo.removeEventListener('ended', handleEnded);
     }
     if (handleVisibility) document.removeEventListener('visibilitychange', handleVisibility);
-    if (handleUnload) window.removeEventListener('beforeunload', handleUnload);
+    if (handlePagehide) window.removeEventListener('pagehide', handlePagehide);
 
     handlePause = null;
     handleSeeked = null;
+    handleEnded = null;
     handleVisibility = null;
-    handleUnload = null;
+    handlePagehide = null;
 
     activeVideo = null;
     activeVideoId = null;

@@ -164,7 +164,7 @@ Executed at the start of each new `onVideoChange` call, before re-initialization
 ```
 progressTracker.stop()
     └── clearInterval(intervalId)
-    └── Removes all event listeners (pause, seeked, visibilitychange, beforeunload)
+    └── Removes all event listeners (pause, seeked, ended, visibilitychange, pagehide)
 
 uiInjector.cleanup()
     └── clearTimeout(dismissTimer)
@@ -177,26 +177,44 @@ playerObserver.disconnect()
 ### 3.3 Progress Save Flow
 
 ```
-[trigger: interval | pause | seeked | visibilitychange | beforeunload]
+[trigger: interval | pause | seeked | ended | visibilitychange | pagehide]
         │
         ▼
 progressTracker reads video.currentTime
         │
         ▼
-Guard: abs(currentTime - lastSavedTime) >= 5 ?
+Guard: adPlaying? liveStream (duration === Infinity)? invalid position
+       (NaN / negative / > duration)?
         │
-    NO  │  YES
+    YES │  NO
     │   │
     │   ▼
-    │  storageManager.saveProgress(videoId, currentTime, duration)
-    │   └── Reads full store
-    │   └── Upserts entry
-    │   └── Checks entry count > 200 → evict oldest
-    │   └── Writes back to chrome.storage.local
-    │
-    ▼
+    │  Is this the interval trigger?
+    │        │
+    │    YES │  NO (pause/seeked/ended/visibilitychange/pagehide)
+    │    │   │
+    │    ▼   ▼
+    │  abs(currentTime - lastSavedTime) >= 5 ?     save unconditionally
+    │    │
+    │  NO │ YES
+    │  │  │
+    │  │  ▼
+    │  │ storageManager.saveProgress(videoId, currentTime, duration)
+    │  │  └── Reads full store
+    │  │  └── Upserts entry
+    │  │  └── Checks entry count > 200 → evict oldest
+    │  │  └── Writes back to chrome.storage.local
+    │  │
+    ▼  ▼
   (no-op)
 ```
+
+> **D-024:** the delta guard applies **only** to the interval trigger. Every event trigger
+> (`pause`, `seeked`, `ended`, `visibilitychange`, `pagehide`) saves unconditionally once the
+> ad/live-stream/invalid-position guards pass. v1.0 documented the exemption for `pause` and
+> `seeked` in this same section while placing the guard inside the shared save function with no
+> trigger check — that was the contradiction; it never actually exempted anything. The fix moves
+> the delta check to run only when `trigger === 'interval'`.
 
 ---
 
@@ -537,21 +555,23 @@ function start(video, videoId) {
   activeVideoId = videoId;
   lastSavedTime = video.currentTime;
 
-  // Core interval
-  intervalId = setInterval(() => attemptSave(), 5000);
+  // Core interval — the only trigger the delta guard applies to (D-024)
+  intervalId = setInterval(() => attemptSave(false, 'interval'), 5000);
 
-  // Event-based triggers
-  video.addEventListener('pause',        handlePause);
-  video.addEventListener('seeked',       handleSeeked);
+  // Event-based triggers — all bypass the delta guard (D-024)
+  video.addEventListener('pause',  handlePause);
+  video.addEventListener('seeked', handleSeeked);
+  video.addEventListener('ended',  handleEnded);
   document.addEventListener('visibilitychange', handleVisibility);
-  window.addEventListener('beforeunload', handleUnload);
+  // pagehide, not beforeunload (D-025) — see §5.4/§7.2, best-effort only
+  window.addEventListener('pagehide', handlePagehide);
 }
 ```
 
-**`attemptSave()`:**
+**`attemptSave(bypassDelta, trigger)`:**
 
 ```javascript
-function attemptSave() {
+function attemptSave(bypassDelta, trigger) {
   if (!activeVideo || !activeVideoId) return;
   if (playerObserver.isAdPlaying()) return;
   if (activeVideo.duration === Infinity) return; // live stream guard
@@ -559,7 +579,9 @@ function attemptSave() {
   const current = Math.floor(activeVideo.currentTime);
   const duration = Math.floor(activeVideo.duration);
 
-  if (Math.abs(current - lastSavedTime) < 5) return; // delta guard
+  if (Number.isNaN(current) || current < 0 || current > duration) return; // invalid position guard
+
+  if (!bypassDelta && Math.abs(current - lastSavedTime) < 5) return; // delta guard — interval only
 
   lastSavedTime = current;
   storageManager.saveProgress(activeVideoId, current, duration)
@@ -567,16 +589,19 @@ function attemptSave() {
 }
 ```
 
-**Event handlers** — all call `attemptSave()` directly:
+**Event handlers** — all call `attemptSave(true, trigger)`, bypassing the delta guard:
 
 | Handler | Notes |
 |---|---|
-| `handlePause` | Saves immediately on pause (no delta guard) |
-| `handleSeeked` | Saves immediately on seek completion (no delta guard) |
+| `handlePause` | Saves immediately on pause |
+| `handleSeeked` | Saves immediately on seek completion |
+| `handleEnded` *(new in v2.0)* | Saves the final position on video end; downstream `shouldResume()` declines it (>95% completion) |
 | `handleVisibility` | Saves only if `document.hidden === true` |
-| `handleUnload` | Saves synchronously using `chrome.storage.local` (best-effort) |
+| `handlePagehide` *(new in v2.0, replaces `handleUnload`/`beforeunload`)* | Best-effort — `chrome.storage.local` is asynchronous and has no synchronous-save capability; the write may not complete before the page is gone (D-025) |
 
-> **Note:** `pause` and `seeked` bypass the delta guard because they represent meaningful user intent, not a periodic check.
+> **D-024:** only the interval trigger passes `bypassDelta = false`. Every event trigger passes
+> `true` because each represents meaningful user intent or a definite end-of-session boundary, not
+> a periodic check.
 
 **`stop()`:**
 
@@ -588,9 +613,10 @@ function stop() {
   if (activeVideo) {
     activeVideo.removeEventListener('pause',  handlePause);
     activeVideo.removeEventListener('seeked', handleSeeked);
+    activeVideo.removeEventListener('ended',  handleEnded);
   }
   document.removeEventListener('visibilitychange', handleVisibility);
-  window.removeEventListener('beforeunload', handleUnload);
+  window.removeEventListener('pagehide', handlePagehide);
 
   activeVideo = null;
   activeVideoId = null;
@@ -919,6 +945,8 @@ All persistent state lives in `chrome.storage.local` under the key `youtubeResum
 | Ad starts during the 400ms delay | `resumeManager` | Re-defer to the ad wait and re-baseline, rather than evaluate the drift guard against a stale baseline; abandons only after 3 such rounds |
 | `chrome.storage.local.get` fails | `storageManager` | Reject; caller skips resume (no saved data treated as absent) |
 | `chrome.storage.local.set` fails | `storageManager` | Reject; progressTracker logs and continues — data loss acceptable |
+| `currentTime` is `NaN`, negative, or exceeds `duration` at save time | `progressTracker` | Skip the save silently on every trigger; not logged as an error |
+| `pagehide` fires before the write completes | `progressTracker` | Best-effort only — no synchronous save API exists; `visibilitychange → hidden` is the more reliable backstop (D-025) |
 | `video.currentTime` assignment throws | `resumeManager` | Catch; skip Restart button injection; log warning |
 | Seek lands >3s off target after 3 attempts | `resumeManager` | Log warning; skip Restart button/toast entirely — never claim a position the video didn't reach (PRD §5.6) |
 | `video.duration` is NaN or 0 | `resumeManager` | Wait for `loadedmetadata`; 5s timeout, one retry (~10s total); skip if still unresolved (D-038) |

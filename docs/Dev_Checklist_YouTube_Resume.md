@@ -341,12 +341,14 @@ Implement per TDD §4.5:
 - [ ] Interval fires every `5000ms` and calls internal `attemptSave()`
 - [ ] `attemptSave()` skips save if `playerObserver.isAdPlaying()` returns `true`
 - [ ] `attemptSave()` skips save if `video.duration === Infinity`
-- [ ] `attemptSave()` skips save if `Math.abs(currentTime - lastSavedTime) < 5`
-- [ ] `attemptSave()` saves and updates `lastSavedTime` when delta is `>= 5`
+- [ ] `attemptSave()` skips save if `currentTime` is `NaN`, negative, or exceeds `duration`
+- [ ] `attemptSave()` skips save if the trigger is `interval` and `Math.abs(currentTime - lastSavedTime) < 5` (D-024 — delta guard applies to the interval trigger only)
+- [ ] `attemptSave()` saves and updates `lastSavedTime` when the delta guard doesn't apply or is satisfied
 - [ ] `pause` event → saves immediately, bypassing delta guard
 - [ ] `seeked` event → saves immediately, bypassing delta guard
+- [ ] `ended` event → saves immediately, bypassing delta guard (new in v2.0)
 - [ ] `visibilitychange` event → saves only when `document.hidden === true`
-- [ ] `beforeunload` event → saves synchronously (best-effort)
+- [ ] `pagehide` event → saves immediately, bypassing delta guard, best-effort only (D-025, replaces `beforeunload`)
 - [ ] `stop()` resets all internal state: `intervalId`, `lastSavedTime`, `activeVideo`, `activeVideoId`
 - [ ] At most one `setInterval` is active at any time across the entire extension
 
