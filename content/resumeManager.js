@@ -209,15 +209,24 @@ const resumeManager = (() => {
     debugLogger.log('tryResume:resumeTime', { resumeTime });
 
     const seekOk = await seekWithVerification(video, resumeTime);
-    if (!seekOk) {
-      console.warn('[YTResume] Seek could not be verified after 3 attempts');
-      debugLogger.log('tryResume:seekUnverified', { currentTime: video.currentTime });
-    }
 
     if (debugLogger.DEBUG) {
       setTimeout(() => {
         debugLogger.log('tryResume:after1000ms', { currentTime: video.currentTime });
       }, 1000);
+    }
+
+    // PRD §5.6: the Restart button (and, by the same logic, the toast) must
+    // appear only when the seek was successfully applied AND verified — not
+    // on a best-effort basis. Showing them after a failed verification is
+    // actively misleading: the toast claims a position the video never
+    // actually landed on (observed live: toast said 19:58, playback
+    // continued from 19:40 — YouTube's own resume cue kept overriding ours
+    // during the verify window).
+    if (!seekOk) {
+      console.warn('[YTResume] Seek could not be verified after 3 attempts');
+      debugLogger.log('tryResume:seekUnverified', { currentTime: video.currentTime });
+      return;
     }
 
     uiInjector.showRestartButton(video, videoId);

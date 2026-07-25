@@ -467,7 +467,13 @@ async function tryResume(video, saved, videoId) {
 
   // D-022: verified seek, bounded retry
   const ok = await seekWithVerification(video, resumeTime);
-  if (!ok) console.warn('[YTResume] Seek could not be verified after 3 attempts');
+
+  // PRD §5.6: UI appears only on a verified seek. Showing it after a failed
+  // verification would claim a position the video never actually reached.
+  if (!ok) {
+    console.warn('[YTResume] Seek could not be verified after 3 attempts');
+    return;
+  }
 
   uiInjector.showRestartButton(video, videoId);
   uiInjector.showToast(resumeTime);
@@ -497,7 +503,7 @@ async function tryResume(video, saved, videoId) {
 - If `video.currentTime` assignment throws mid-verification, catch, log, stop retrying — do not inject Restart button
 - If metadata never loads after two attempts (~10s total), skip resume for this video
 - If an ad never clears within 60s, skip resume for this video
-- Seek verification failing after 3 attempts logs a warning but still shows the Restart button/toast — best-effort seek already occurred
+- Seek verification failing after 3 attempts logs a warning; Restart button/toast are **not** shown (PRD §5.6 — UI requires a verified seek, not just a best-effort one)
 
 ---
 
@@ -914,7 +920,7 @@ All persistent state lives in `chrome.storage.local` under the key `youtubeResum
 | `chrome.storage.local.get` fails | `storageManager` | Reject; caller skips resume (no saved data treated as absent) |
 | `chrome.storage.local.set` fails | `storageManager` | Reject; progressTracker logs and continues — data loss acceptable |
 | `video.currentTime` assignment throws | `resumeManager` | Catch; skip Restart button injection; log warning |
-| Seek lands >3s off target after 3 attempts | `resumeManager` | Log warning; still shows Restart button/toast (D-022) |
+| Seek lands >3s off target after 3 attempts | `resumeManager` | Log warning; skip Restart button/toast entirely — never claim a position the video didn't reach (PRD §5.6) |
 | `video.duration` is NaN or 0 | `resumeManager` | Wait for `loadedmetadata`; 5s timeout, one retry (~10s total); skip if still unresolved (D-038) |
 | `.ytp-time-display` not in DOM | `uiInjector` | Log warning; skip injection; resume still occurred |
 | `yt-navigate-finish` never fires | `navigationManager` | Fallback URL polling activates after 1s |
