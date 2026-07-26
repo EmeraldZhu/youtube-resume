@@ -438,10 +438,18 @@ const SEEK_MAX_ATTEMPTS = 3;        // D-022
 
 #### Detailed Logic
 
-Rewritten Phase 2 (D-019 through D-022, D-038). Order of operations:
+Rewritten Phase 2 (D-019 through D-022, D-038); Phase 3 added the minimum-watched short-circuit below.
 
 ```javascript
 async function tryResume(video, saved, videoId) {
+  // Duration-independent short-circuit: reject a saved time below the
+  // minimum-watched threshold before paying for the metadata wait — no
+  // duration value could make shouldResume() true anyway. Found via a live
+  // "Metadata wait failed" report on a 19s video that could never resume.
+  if (!timeUtils.meetsMinimumWatched(saved.time)) {
+    return;
+  }
+
   // Wait for duration to be available; one retry on timeout (D-038 — the 5s
   // timeout is reachable on ordinary connections, not just throttled ones)
   if (!video.duration || isNaN(video.duration)) {
@@ -579,7 +587,7 @@ function attemptSave(bypassDelta, trigger) {
   const current = Math.floor(activeVideo.currentTime);
   const duration = Math.floor(activeVideo.duration);
 
-  if (Number.isNaN(current) || current < 0 || current > duration) return; // invalid position guard
+  if (Number.isNaN(current) || current < 0 || Number.isNaN(duration) || current > duration) return; // invalid position guard
 
   if (!bypassDelta && Math.abs(current - lastSavedTime) < 5) return; // delta guard — interval only
 
@@ -856,6 +864,7 @@ function isLive(video) {
 
 ```typescript
 timeUtils.shouldResume(savedTime: number, duration: number): boolean
+timeUtils.meetsMinimumWatched(savedTime: number): boolean
 timeUtils.getResumeTime(savedTime: number): number
 ```
 
@@ -867,9 +876,16 @@ const MIN_RESUME_SECONDS   = 30;
 const COMPLETION_THRESHOLD = 0.95;
 const ROLLBACK_SECONDS     = 2;
 
+// Exposed separately (Phase 3) so resumeManager can reject a saved time
+// below the minimum before paying for the metadata wait (D-038) — no
+// duration value could make shouldResume() true in that case anyway.
+function meetsMinimumWatched(savedTime) {
+  return savedTime > MIN_RESUME_SECONDS;
+}
+
 function shouldResume(savedTime, duration) {
   if (!duration || isNaN(duration) || duration === Infinity) return false;
-  return savedTime > MIN_RESUME_SECONDS &&
+  return meetsMinimumWatched(savedTime) &&
          savedTime < duration * COMPLETION_THRESHOLD;
 }
 

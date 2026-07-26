@@ -46,7 +46,7 @@ const progressTracker = (() => {
     const current = Math.floor(activeVideo.currentTime);
     const duration = Math.floor(activeVideo.duration);
 
-    if (Number.isNaN(current) || current < 0 || current > duration) {
+    if (Number.isNaN(current) || current < 0 || Number.isNaN(duration) || current > duration) {
       debugLogger.log('attemptSave:skipped', { trigger, reason: 'invalidPosition', current, duration });
       return; // invalid position guard
     }

@@ -114,6 +114,14 @@ const resumeManager = (() => {
       videoDurationAtEntry: video.duration,
     });
 
+    // Duration-independent short-circuit: below the minimum watched threshold,
+    // no duration value could make shouldResume() true, so don't pay for the
+    // metadata wait (D-038) just to fail the bounds check anyway.
+    if (!timeUtils.meetsMinimumWatched(saved.time)) {
+      debugLogger.log('tryResume:belowMinimum', { savedTime: saved.time });
+      return;
+    }
+
     // Wait for duration to be available. D-038: the 5s timeout is reachable
     // under ordinary (non-throttled) conditions, so retry once before giving up.
     let metadataWaitOccurred = false;
