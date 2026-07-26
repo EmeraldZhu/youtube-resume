@@ -12,7 +12,7 @@
 | 0 | Phase 0 — Guardrails & Tracking Setup | DONE | — |
 | 1 | Reliability Audit & Instrumentation | DONE | — |
 | 2 | Resume Engine Hardening | DONE | — |
-| 3 | Progress Tracking Hardening | AWAITING VERIFICATION | — |
+| 3 | Progress Tracking Hardening | DONE | — |
 | 4 | Storage Schema v2, Title Capture & Migration | NOT STARTED | — |
 | 5 | In-Player UI Re-Calibration | NOT STARTED | — |
 | 6 | Settings Store & Settings Panel | NOT STARTED | — |
@@ -39,17 +39,17 @@ v1.0 popup, bootstrap orchestration.
 - Resume reliability (Phase 2) fixed, owner-verified: ad gating (D-019/D-020/D-040), drift guard
   (D-021/D-037), verified seek gated to real UI (D-022/D-041), non-rejecting `waitForVideo()`
   (D-023), teardown/re-entry fix (D-036), metadata retry (D-038).
-- Progress tracking (Phase 3) built, awaiting verification: delta guard on interval only (D-024),
-  `ended` handler added (H6 fixed), `pagehide` replaces `beforeunload` (D-025), invalid-position guard.
+- Progress tracking (Phase 3) fixed, owner-verified: delta guard on interval only (D-024),
+  `ended` handler added (H6 fixed), `pagehide` replaces `beforeunload` (D-025), invalid-position
+  guard incl. NaN-duration hole (D-042/D-043).
 - Restart button/toast don't match YouTube's current UI: toast overlaps progress bar (D-028),
   button is bare text among pill controls (D-027).
 - No settings, no saved-videos panel, no video titles in storage.
 
 ## Next action
 
-Phase 3 is built and awaiting owner verification (T3.1–T3.8). Once confirmed DONE, next is
-Phase 4 — Storage Schema v2, Title Capture & Migration. D-034 (ship reliability as a v1.1 patch?)
-is worth an owner decision now that Phases 1–3 are complete — see recommendation below.
+Phase 3 confirmed DONE by owner. Next is Phase 4 — Storage Schema v2, Title Capture & Migration.
+D-034 (ship reliability as a v1.1 patch?) remains OPEN, owned by Human.
 
 ## Doc versions
 
