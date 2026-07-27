@@ -52,6 +52,12 @@ v1.0 popup, bootstrap orchestration.
   place (T8.9). List region clamps via static `max-height`, not flexbox `flex:1` (D-053 — the flex
   approach silently failed to clamp). T8.1–T8.12, T8.14 run live via `chrome-devtools-mcp` against
   seeded 200-entry storage; T8.4 confirmed on a real open YouTube tab.
+- Post-Phase-8 owner-requested polish, verified live: title capture strips a leading `(3)`-style
+  notification-count prefix (D-057); schema gains optional `channel`, captured via new
+  `youtubeUtils.getChannelName()` (D-056); thumbnail grows 120×68 → 144×81 (D-055) and gains a
+  YouTube-style duration badge + watched-progress line that render even with thumbnails off, since
+  they're text/CSS, not an image (D-054); header gains a centered icon-only Ko-fi link, inline SVG
+  rather than a second emoji exception (D-058, CP-61).
 
 ## Next action
 

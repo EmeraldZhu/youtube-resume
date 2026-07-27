@@ -5,11 +5,12 @@
  * inspection. No side effects — reads only.
  *
  * Public API:
- *   youtubeUtils.isWatchPage() → boolean
- *   youtubeUtils.getVideoId()  → string | null
- *   youtubeUtils.isShorts()    → boolean
- *   youtubeUtils.isLive(video) → boolean
- *   youtubeUtils.getTitle()    → string | null
+ *   youtubeUtils.isWatchPage()     → boolean
+ *   youtubeUtils.getVideoId()      → string | null
+ *   youtubeUtils.isShorts()        → boolean
+ *   youtubeUtils.isLive(video)     → boolean
+ *   youtubeUtils.getTitle()        → string | null
+ *   youtubeUtils.getChannelName()  → string | null
  */
 
 const youtubeUtils = {
@@ -49,14 +50,19 @@ const youtubeUtils = {
   /**
    * Returns the current video's title, or null if unavailable.
    * Prefers document.title (D-015: far more stable across YouTube
-   * redesigns than metadata selectors) with the trailing " - YouTube"
-   * suffix stripped, falling back to a DOM selector, then to null.
-   * Never throws — a missing title must never block a save.
+   * redesigns than metadata selectors), stripping both the trailing
+   * " - YouTube" suffix and a leading "(3) " unread-notification-count
+   * prefix Chrome shows in the tab title, falling back to a DOM
+   * selector, then to null. Never throws — a missing title must never
+   * block a save.
    */
   getTitle() {
     const raw = document.title;
     if (typeof raw === 'string') {
-      const stripped = raw.replace(/ - YouTube$/, '').trim();
+      const stripped = raw
+        .replace(/^\(\d+\)\s*/, '')
+        .replace(/ - YouTube$/, '')
+        .trim();
       if (stripped) return stripped;
     }
 
@@ -68,6 +74,28 @@ const youtubeUtils = {
       if (text) return text;
     } catch (err) {
       // Fall through to null — DOM fallback is best-effort.
+    }
+
+    return null;
+  },
+
+  /**
+   * Returns the current video's channel/uploader name, or null if
+   * unavailable. DOM-only — unlike the title, the channel name has no
+   * document.title equivalent to prefer. Scoped to the primary metadata
+   * owner box (not a bare `#channel-name`, which also matches inside
+   * comments) so it can't pick up an unrelated channel. Never throws —
+   * a missing channel must never block a save.
+   */
+  getChannelName() {
+    try {
+      const el = document.querySelector(
+        'ytd-watch-metadata ytd-channel-name a, ytd-video-owner-renderer #channel-name a'
+      );
+      const text = el?.textContent?.trim();
+      if (text) return text;
+    } catch (err) {
+      // Best-effort only.
     }
 
     return null;

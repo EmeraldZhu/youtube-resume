@@ -85,11 +85,15 @@ h1, h2, p {
   align-items: center;
 }
 
-/* Header row (view 1: title, count + gear) */
+/* Header row (view 1: title | Ko-fi icon (centered) | count + gear) */
 .header-row {
-  display: flex;
-  justify-content: space-between;
+  display: grid;
+  grid-template-columns: 1fr auto 1fr;
   align-items: center;
+}
+
+.kofi-btn {
+  justify-self: center;
 }
 
 .header-right {
@@ -97,6 +101,7 @@ h1, h2, p {
   align-items: center;
   gap: 8px;
   flex-shrink: 0;
+  justify-self: end;
 }
 
 .count {
@@ -118,6 +123,9 @@ h1, h2, p {
 }
 
 .icon-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
   flex-shrink: 0;
   background: transparent;
   border: none;
@@ -382,19 +390,50 @@ a {
 }
 
 .thumb-wrap {
+  position: relative;
   flex-shrink: 0;
-  width: 120px;
-  height: 68px;
+  width: 144px;
+  height: 81px;
   border-radius: 4px;
   overflow: hidden;
   background: var(--thumb-placeholder);
 }
 
 .thumb {
-  width: 120px;
-  height: 68px;
+  width: 144px;
+  height: 81px;
   object-fit: cover;
   display: block;
+}
+
+/* Duration badge and watched-progress line render on the thumbnail
+   itself, YouTube-style — pure CSS/text, no image, so both still show
+   with thumbnails disabled (D-005 exception: text isn't a request). */
+.thumb-duration {
+  position: absolute;
+  right: 4px;
+  bottom: 6px;
+  padding: 1px 4px;
+  background: rgba(0, 0, 0, 0.8);
+  color: #ffffff;
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+  border-radius: 2px;
+  line-height: 1.4;
+}
+
+.thumb-progress-track {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  height: 3px;
+  background: rgba(0, 0, 0, 0.4);
+}
+
+.thumb-progress-fill {
+  height: 100%;
+  background: var(--progress-fill);
 }
 
 .row-text {
@@ -403,7 +442,7 @@ a {
   display: flex;
   flex-direction: column;
   justify-content: center;
-  gap: 6px;
+  gap: 4px;
 }
 
 .row-title {
@@ -415,16 +454,12 @@ a {
   overflow: hidden;
 }
 
-.progress-track {
-  height: 3px;
-  border-radius: 2px;
-  background: var(--divider-color);
+.row-channel {
+  font-size: 12px;
+  color: var(--text-muted);
+  white-space: nowrap;
   overflow: hidden;
-}
-
-.progress-fill {
-  height: 100%;
-  background: var(--progress-fill);
+  text-overflow: ellipsis;
 }
 
 .row-meta {

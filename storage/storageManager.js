@@ -8,7 +8,7 @@
  * Public API:
  *   storageManager.getProgress(videoId)    → Promise<VideoProgress | null>
  *   storageManager.getAllProgress()        → Promise<Record<string, VideoProgress>>
- *   storageManager.saveProgress(videoId, time, duration, title?) → Promise<void>
+ *   storageManager.saveProgress(videoId, time, duration, title?, channel?) → Promise<void>
  *   storageManager.deleteProgress(videoId) → Promise<void>
  *   storageManager.clearAllProgress()      → Promise<void>
  *   storageManager.getSettings()           → Promise<Settings>
@@ -17,7 +17,7 @@
  *   storageManager.getDefaultSettings()    → Settings (sync, no storage access)
  *
  * Types:
- *   VideoProgress = { time: number, duration: number, updated: number, title?: string }
+ *   VideoProgress = { time: number, duration: number, updated: number, title?: string, channel?: string }
  *
  * Storage shape (schema v2):
  *   {
@@ -116,8 +116,12 @@ const storageManager = (() => {
    *   omitted/falsy, an existing stored title (if any) is preserved
    *   rather than erased — title capture can fail transiently while a
    *   good title from an earlier save already exists (D-016).
+   * @param {string} channel - Optional. Capped at MAX_TITLE_LENGTH, same
+   *   preserve-if-omitted behaviour as title, for the same reason
+   *   (D-016) — the channel name has no document.title fallback, so a
+   *   transient DOM-selector miss is more likely, not less.
    */
-  async function saveProgress(videoId, time, duration, title) {
+  async function saveProgress(videoId, time, duration, title, channel) {
     assertStorageAvailable();
     const result = await chrome.storage.local.get(STORAGE_KEY);
     const store = result[STORAGE_KEY] ?? {};
@@ -132,6 +136,11 @@ const storageManager = (() => {
     const resolvedTitle = title ? title.slice(0, MAX_TITLE_LENGTH) : existing?.title;
     if (resolvedTitle) {
       entry.title = resolvedTitle;
+    }
+
+    const resolvedChannel = channel ? channel.slice(0, MAX_TITLE_LENGTH) : existing?.channel;
+    if (resolvedChannel) {
+      entry.channel = resolvedChannel;
     }
 
     store[videoId] = entry;

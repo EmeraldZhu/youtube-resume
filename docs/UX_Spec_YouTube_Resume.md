@@ -341,40 +341,46 @@ Lower-left of the video frame, **fully clear of the progress bar**.
 #### Layout
 
 ```
-┌────────────────────────────────────────────────┐
-│  YouTube Resume            34 saved videos  ⚙ │ ← fixed header
-├────────────────────────────────────────────────┤
-│ ┌──────────┐                                   │
-│ │          │  Building a UE5 game from      ✕ │
-│ │  thumb   │  scratch — part 3                 │
-│ │ 120×68   │  ▓▓▓▓▓▓▓░░░░░░░░░░░░░             │
-│ └──────────┘  3:03 / 18:34 · 16% watched       │
-├────────────────────────────────────────────────┤
-│ ┌──────────┐                                   │
-│ │  thumb   │  Advanced TypeScript patterns  ✕ │
-│ │          │  ▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓░░░░░             │
-│ └──────────┘  42:10 / 58:22 · 72% watched      │
-├────────────────────────────────────────────────┤
-│                     ⋮ scrolls                  │
-└────────────────────────────────────────────────┘
+┌──────────────────────────────────────────────────┐
+│  YouTube Resume        ☕        34 saved videos ⚙│ ← fixed header
+├──────────────────────────────────────────────────┤
+│ ┌────────────┐                                   │
+│ │            │20:00  Building a UE5 game from  ✕ │
+│ │   thumb    │       scratch — part 3             │
+│ │  144×81    │       Some Game Dev Channel         │
+│ │ ▓▓▓▓░░░░░░ │       4:05 / 20:00 · 20% watched   │
+│ └────────────┘                                   │
+├──────────────────────────────────────────────────┤
+│ ┌────────────┐                                   │
+│ │            │58:22  Advanced TypeScript          │
+│ │   thumb    │       patterns                  ✕ │
+│ │ ▓▓▓▓▓▓▓▓▓░ │       Some Coding Channel           │
+│ └────────────┘       42:10 / 58:22 · 72% watched  │
+├──────────────────────────────────────────────────┤
+│                     ⋮ scrolls                    │
+└──────────────────────────────────────────────────┘
 ```
+
+**Header, revised (post-Phase-8 polish):** an icon-only Ko-fi link (`☕`, drawn as an inline SVG — not the reserved ❤️ emoji) sits centered between the title and the count/gear, via a 3-column header grid. `aria-label` CP-61.
 
 #### Row Specification
 
 | Element | Spec |
 |---|---|
-| Thumbnail | 120×68, `https://i.ytimg.com/vi/{videoId}/mqdefault.jpg`, `loading="lazy"` |
+| Thumbnail | 144×81 (16:9), `https://i.ytimg.com/vi/{videoId}/mqdefault.jpg`, `loading="lazy"` |
+| Duration badge | Bottom-right of the thumbnail, `{duration}`, dark pill — plain text/CSS overlay, not baked into the image (D-054) |
+| Watched-progress line | Bottom edge of the thumbnail, fill proportional to `time / duration` — the at-a-glance YouTube-style indicator; the precise numbers stay in the meta line below, not duplicated |
 | Title | Two lines maximum, ellipsis overflow. Falls back to CP-37 |
-| Progress bar | Fill proportional to `time / duration` |
+| Channel name | One line, ellipsis overflow, muted. Omitted entirely (no placeholder) when not yet captured |
 | Meta line | CP-34 and CP-35 — `{position} / {duration} · {percent}% watched` |
 | Remove control | `✕`, revealed on row hover, always keyboard-focusable |
 | Whole-row target | `<a href="https://www.youtube.com/watch?v={id}" target="_blank" rel="noopener noreferrer">` |
 
 **Sort order:** `updated` descending — most recently watched first. Not configurable.
 
-**Thumbnail failure:** on load error, show a neutral placeholder. Never a broken-image icon, never a console error. Deleted and private videos are an expected case, not a bug.
+**Thumbnail failure:** on load error, show a neutral placeholder. Never a broken-image icon, never a console error. Deleted and private videos are an expected case, not a bug. The duration badge and progress line still render on the placeholder — they're independent of the image itself.
 
-**Thumbnails disabled:** render the placeholder and issue **no** network request. `loading="lazy"` is not sufficient — the `src` must not be set at all.
+**Thumbnails disabled:** render the placeholder and issue **no** network request. `loading="lazy"` is not sufficient — the `src` must not be set at all. The duration badge and progress line still render — they're text/CSS, not a request, so D-005's zero-network guarantee is unaffected.
 
 #### Empty State
 
@@ -496,6 +502,9 @@ Standard Chrome extension utility styling. Not YouTube-themed.
 | Progress bar fill | `#cc0000` |
 | Progress bar track | `#e5e5e5` |
 | Thumbnail placeholder | `#f0f0f0` |
+| Thumbnail duration badge | `rgba(0,0,0,0.8)` background, `#ffffff` text |
+| Thumbnail progress line track | `rgba(0,0,0,0.4)` |
+| Thumbnail progress line fill | `#cc0000` (same as progress bar fill) |
 | Destructive action text | `#c00000` |
 | Width | `360px` fixed |
 | Max height | `560px` |
@@ -579,6 +588,7 @@ The single source of truth for all user-facing text.
 | CP-58 | Cross-promo — header | `Other tools` |
 | CP-59 | Cross-promo — product name | `Session Switcher` |
 | CP-60 | Cross-promo — description | `Switch between multiple account sessions.` |
+| CP-61 | Header — Ko-fi icon `aria-label` | `Support on Ko-fi` |
 
 ### 7.5 Retired Copy IDs
 

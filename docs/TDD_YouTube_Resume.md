@@ -695,7 +695,7 @@ the popup, which loads this module too as of Phase 4).
 ```typescript
 storageManager.getProgress(videoId: string): Promise<VideoProgress | null>
 storageManager.getAllProgress(): Promise<Record<string, VideoProgress>>
-storageManager.saveProgress(videoId: string, time: number, duration: number, title?: string): Promise<void>
+storageManager.saveProgress(videoId: string, time: number, duration: number, title?: string, channel?: string): Promise<void>
 storageManager.deleteProgress(videoId: string): Promise<void>
 storageManager.clearAllProgress(): Promise<void>
 storageManager.getSettings(): Promise<Settings>              // v2 — Phase 6
@@ -712,6 +712,7 @@ type VideoProgress = {
   duration: number;   // Total video duration, seconds (integer)
   updated: number;    // Unix timestamp in seconds
   title?: string;     // v2 — optional, capped at 200 chars
+  channel?: string;   // v2 (Phase 8 polish) — optional, capped at 200 chars
 };
 
 type Settings = {
@@ -1064,7 +1065,13 @@ youtubeUtils.isWatchPage(): boolean
 youtubeUtils.getVideoId(): string | null
 youtubeUtils.isShorts(): boolean
 youtubeUtils.isLive(video: HTMLVideoElement): boolean
+youtubeUtils.getTitle(): string | null
+youtubeUtils.getChannelName(): string | null
 ```
+
+> This section predates title/channel capture (added D-015/D-016 and Phase 8 polish respectively)
+> and is otherwise stale per the doc-routing note at the top of this file — treat everything below
+> except `getTitle`/`getChannelName` as historical until the Phase 9 rewrite.
 
 #### Implementations
 
@@ -1086,6 +1093,16 @@ function isShorts() {
 function isLive(video) {
   return video.duration === Infinity;
 }
+
+// Strips both the trailing " - YouTube" suffix and a leading "(3) "
+// unread-notification-count prefix from document.title; falls back to a
+// scoped DOM selector, then null. Never throws.
+function getTitle() { /* see utils/youtubeUtils.js */ }
+
+// DOM-only — there's no document.title equivalent for channel name.
+// Scoped to the primary watch-page metadata box so it can't match a
+// channel name inside the comments section. Never throws.
+function getChannelName() { /* see utils/youtubeUtils.js */ }
 ```
 
 ---
@@ -1185,7 +1202,18 @@ unset `src` — because `loading="lazy"` alone does not prevent a request once `
 On load error, the handler removes the `<img>` and adds `.placeholder` to `.thumb-wrap`, whose
 background colour is the only visual left (T8.7) — no broken-image icon, no console error from
 application code (the browser's own "failed to load resource" network log for a 404 image is
-unrelated to and unsuppressible by application code).
+unrelated to and unsuppressible by application code). Thumbnails render at 144×81 (D-055).
+
+**Duration badge and watched-progress line (D-054):** built and appended to `.thumb-wrap` as an
+independent step from the `<img>`/placeholder branch above — a `<span class="thumb-duration">` and a
+`.thumb-progress-track > .thumb-progress-fill` pair. Because these are plain DOM/text/CSS, not an
+image, they render identically whether `loadThumbnails` is on, off, or the thumbnail 404'd; the
+precise `{position}/{duration} · {percent}%` numbers stay in `.row-meta` below rather than being
+duplicated onto the thumbnail.
+
+**Channel name:** `entry.channel` renders as a `.row-channel` paragraph between the title and meta
+line, but only when present — no row is created for a missing channel (older entries, or a
+same-session capture miss), so there's no placeholder text to maintain.
 
 **Remove control:** `deleteProgress(videoId)` (§4.6) then a direct DOM removal of that `<li>` and a
 count decrement — no full re-render, no re-read from storage (T8.9).
@@ -1196,6 +1224,10 @@ view switching; `updateCount(0)` is the single place that decides which is shown
 **Render budget (T8.2):** 200 entries render in ~25ms measured via `chrome-devtools-mcp` (D-051/D-052)
 — comfortably under the 200ms budget (Roadmap 8.10) — because the list is built once from an
 already-fetched object and appended in a single pass, with thumbnails loading progressively after.
+
+**Ko-fi link (D-058):** a static `<a class="kofi-btn">` in `popup.html`'s header, not built by
+`popup.js` — no dynamic state, so no reason to construct it at runtime. Inline `<svg>` markup in the
+HTML source is not the `innerHTML` API and doesn't trip T8.13's grep.
 
 ---
 

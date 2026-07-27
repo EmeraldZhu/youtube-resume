@@ -80,8 +80,8 @@ document.addEventListener('DOMContentLoaded', async () => {
     if (loadThumbnails) {
       const img = document.createElement('img');
       img.className = 'thumb';
-      img.width = 120;
-      img.height = 68;
+      img.width = 144;
+      img.height = 81;
       img.alt = '';
       img.loading = 'lazy';
       img.addEventListener('error', () => {
@@ -97,28 +97,43 @@ document.addEventListener('DOMContentLoaded', async () => {
       thumbWrap.classList.add('placeholder');
     }
 
+    const duration = entry.duration > 0 ? entry.duration : 0;
+    const percent = duration > 0 ? Math.min(100, Math.max(0, Math.round((entry.time / duration) * 100))) : 0;
+
+    // Duration badge and watched-progress line render directly on the
+    // thumbnail (D-054) — text/CSS only, not an image, so they still show
+    // when loadThumbnails is off without violating the zero-network promise.
+    const durationBadge = document.createElement('span');
+    durationBadge.className = 'thumb-duration';
+    durationBadge.textContent = formatTime(duration);
+    thumbWrap.appendChild(durationBadge);
+
+    const thumbProgressTrack = document.createElement('div');
+    thumbProgressTrack.className = 'thumb-progress-track';
+    const thumbProgressFill = document.createElement('div');
+    thumbProgressFill.className = 'thumb-progress-fill';
+    thumbProgressFill.style.width = `${percent}%`;
+    thumbProgressTrack.appendChild(thumbProgressFill);
+    thumbWrap.appendChild(thumbProgressTrack);
+
     const textBlock = document.createElement('div');
     textBlock.className = 'row-text';
 
     const titleEl = document.createElement('p');
     titleEl.className = 'row-title';
     titleEl.textContent = entry.title || 'Untitled video';
+    textBlock.appendChild(titleEl);
 
-    const progressTrack = document.createElement('div');
-    progressTrack.className = 'progress-track';
-    const progressFill = document.createElement('div');
-    progressFill.className = 'progress-fill';
-    const duration = entry.duration > 0 ? entry.duration : 0;
-    const percent = duration > 0 ? Math.min(100, Math.max(0, Math.round((entry.time / duration) * 100))) : 0;
-    progressFill.style.width = `${percent}%`;
-    progressTrack.appendChild(progressFill);
+    if (entry.channel) {
+      const channelEl = document.createElement('p');
+      channelEl.className = 'row-channel';
+      channelEl.textContent = entry.channel;
+      textBlock.appendChild(channelEl);
+    }
 
     const metaEl = document.createElement('p');
     metaEl.className = 'row-meta';
     metaEl.textContent = `${formatTime(entry.time)} / ${formatTime(duration)} · ${percent}% watched`;
-
-    textBlock.appendChild(titleEl);
-    textBlock.appendChild(progressTrack);
     textBlock.appendChild(metaEl);
 
     link.appendChild(thumbWrap);

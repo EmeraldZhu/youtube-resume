@@ -69,7 +69,8 @@ const progressTracker = (() => {
 
     lastSavedTime = current;
     const title = youtubeUtils.getTitle();
-    storageManager.saveProgress(activeVideoId, current, duration, title)
+    const channel = youtubeUtils.getChannelName();
+    storageManager.saveProgress(activeVideoId, current, duration, title, channel)
       .catch(err => console.warn('[YTResume] Save failed:', err.message));
   }
 

@@ -382,16 +382,16 @@ Six settings, presented as a panel inside the extension popup (not a separate op
 Clicking the extension icon opens a panel listing saved videos, newest first.
 
 **Each row shows:**
-- Video thumbnail
+- Video thumbnail (144×81), with the video's duration and a watched-progress line overlaid on it, YouTube-style
 - Video title, falling back to `Untitled video` where unknown
-- A progress bar
+- Channel/uploader name, omitted entirely when not yet captured (no placeholder text)
 - Saved position and total duration, plus percentage watched
 
 **Behaviour:**
 - Clicking a row opens that video in a new tab; the extension then resumes it through the normal resume path — no separate mechanism
 - Each row has a remove control deleting that single entry, updating the list in place
 - Empty state is shown when nothing is saved
-- The header shows the saved count and a control to open settings
+- The header shows the saved count, an icon-only Ko-fi support link, and a control to open settings
 - Rendering completes in under 200ms with a full 200 entries; thumbnails may load progressively but must not block the list
 
 **Thumbnails:**
@@ -399,8 +399,11 @@ Clicking the extension icon opens a panel listing saved videos, newest first.
 - This requires no additional permission and transmits no user data beyond the ordinary request
 - Failures (deleted or private videos) show a neutral placeholder, never a broken image
 - When the thumbnails setting is off, no request is made at all and the extension remains fully offline
+- The duration badge and watched-progress line are plain text/CSS, not part of the image — they render on placeholders and with thumbnails disabled, without making any request
 
 **Opening a video requires no `tabs` permission** — rows are ordinary links.
+
+**Title capture** strips both a trailing `" - YouTube"` suffix and a leading `(3)`-style unread-notification-count prefix from the browser tab title, so neither ever leaks into a saved title.
 
 ---
 
@@ -427,7 +430,7 @@ youtube-resume/
 │   └── storageManager.js       # chrome.storage.local abstraction, settings, migration
 │
 ├── utils/
-│   ├── youtubeUtils.js         # URL parsing, videoId extraction, title capture
+│   ├── youtubeUtils.js         # URL parsing, videoId extraction, title/channel capture
 │   └── timeUtils.js            # Threshold math, resume calculations, formatting
 │
 ├── popup/
@@ -452,10 +455,10 @@ youtube-resume/
 | `navigationManager.js` | Detects video changes via `yt-navigate-finish`, cold load, URL-polling fallback, and same-video re-entry |
 | `playerObserver.js` | Resolves the `<video>` element, waiting for `#movie_player` if necessary. Exposes ad state. Owns the single `MutationObserver`. |
 | `resumeManager.js` | Validates against settings, gates on ad state, applies the 400ms delay, seeks, and verifies |
-| `progressTracker.js` | Owns the single `setInterval` and all playback event listeners. Captures the video title on save. |
+| `progressTracker.js` | Owns the single `setInterval` and all playback event listeners. Captures the video title and channel name on save. |
 | `storageManager.js` | The **only** module that touches `chrome.storage.local`. Owns watch data, settings, eviction, and schema migration. |
 | `uiInjector.js` | Injects and tears down the Restart button and resume toast. `document.createElement` only. |
-| `youtubeUtils.js` | Pure URL and page-type inspection, plus video title extraction |
+| `youtubeUtils.js` | Pure URL and page-type inspection, plus video title and channel name extraction |
 | `timeUtils.js` | Pure threshold math and timestamp formatting |
 | `popup/*` | Saved videos list and settings panel. Reads through `storageManager` semantics; no direct DOM injection into YouTube. |
 
@@ -530,6 +533,7 @@ type VideoProgress = {
   duration: number;   // Total video duration in seconds (integer)
   updated: number;    // Unix timestamp (seconds) of last save
   title?: string;     // v2.0 — video title, max 200 chars, optional
+  channel?: string;   // v2.0 (post-Phase-8 polish) — channel/uploader name, max 200 chars, optional
 };
 
 type Settings = {
@@ -551,7 +555,8 @@ type Settings = {
       "time": 1043,
       "duration": 2120,
       "updated": 1710000000,
-      "title": "Building a UE5 game from scratch"
+      "title": "Building a UE5 game from scratch",
+      "channel": "Some Game Dev Channel"
     }
   },
   "youtubeResumeSettings": {
@@ -566,7 +571,9 @@ type Settings = {
 }
 ```
 
-**Title capture:** read from `document.title` with the trailing ` - YouTube` stripped, falling back to a DOM selector, then to omission. `document.title` is used in preference to YouTube's metadata selectors because it is materially more stable across YouTube redesigns. A missing title must never block a save.
+**Title capture:** read from `document.title` with both the trailing ` - YouTube` suffix and a leading `(3)`-style unread-notification-count prefix stripped, falling back to a DOM selector, then to omission. `document.title` is used in preference to YouTube's metadata selectors because it is materially more stable across YouTube redesigns. A missing title must never block a save.
+
+**Channel capture:** read from a DOM selector scoped to the primary watch-page metadata box (there is no `document.title` equivalent for channel name). A missing channel must never block a save, and existing entries are never backfilled — the panel simply omits the channel line until the video is watched again.
 
 ### 7.4 Storage Lifecycle
 
@@ -681,7 +688,7 @@ Entries without a title display the fallback label in the panel until the user n
 | No user identification | No account, profile, or fingerprinting |
 | No analytics | No telemetry, event tracking, or error reporting |
 | No third-party scripts | Zero external scripts or CDN code |
-| Data minimization | Only `time`, `duration`, `updated`, and `title` stored per video |
+| Data minimization | Only `time`, `duration`, `updated`, `title`, and `channel` stored per video |
 | Network transparency | The single network exception is disclosed, and can be turned off |
 
 ### 10.2 Thumbnail Disclosure *(new in v2.0)*
@@ -723,7 +730,7 @@ Full phase-by-phase test tables are in ROADMAP_v2.md. This section defines the c
 
 | Module | Test Cases |
 |---|---|
-| `youtubeUtils.js` | Watch, Shorts, live, embed, non-YouTube URLs; videoId extraction; title extraction and suffix stripping |
+| `youtubeUtils.js` | Watch, Shorts, live, embed, non-YouTube URLs; videoId extraction; title extraction, suffix/notification-count-prefix stripping; channel name extraction |
 | `timeUtils.js` | Threshold boundaries at each configurable value; rewind at Off/2/5/10; floor at 0; timestamp formatting under and over one hour |
 | `storageManager.js` | Read/write round-trip; eviction at 201; delete; empty store; settings merge over defaults; corrupt settings; migration idempotency |
 
