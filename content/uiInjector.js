@@ -57,6 +57,10 @@ const uiInjector = (() => {
     // Font/color match .ytp-time-display exactly. No native inline text button exists
     // to copy for the pill treatment, so the fill borrows the measured .ytp-menuitem
     // hover intensity and the radius is derived from the 40px control-row height.
+    // alignSelf: 'center' is required — .ytp-left-controls is a flex row with
+    // align-items: normal (stretch), and a fixed-height child without it collapses
+    // to flex-start, sitting flush against the progress bar instead of centered
+    // like the native 40px-tall buttons (D-047).
     const REST_BG = 'rgba(255, 255, 255, 0.1)';
     const HOVER_BG = 'rgba(255, 255, 255, 0.2)';
     Object.assign(button.style, {
@@ -75,6 +79,7 @@ const uiInjector = (() => {
       boxSizing:      'border-box',
       verticalAlign:  'middle',
       letterSpacing:  'normal',
+      alignSelf:      'center',
       transition:     'background-color 0.1s cubic-bezier(0, 0, 0.2, 1)',
     });
 

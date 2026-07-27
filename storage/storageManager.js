@@ -45,12 +45,26 @@ const storageManager = (() => {
   };
 
   /**
+   * chrome.storage is undefined when this content-script instance is a stale one
+   * left running after the extension was reloaded (a dev-only Load-Unpacked
+   * artifact — a real install never invalidates an already-injected tab's
+   * context). Callers already end their promise chain in .catch(), so this just
+   * makes the resulting warning diagnosable instead of a bare TypeError.
+   */
+  function assertStorageAvailable() {
+    if (!chrome?.storage?.local) {
+      throw new Error('chrome.storage unavailable — extension context invalidated, reload the page');
+    }
+  }
+
+  /**
    * v1 -> v2 migration (PRD §7.6). Purely additive: writes the schema
    * version and default settings if missing, and never touches existing
    * youtubeResume entries. Idempotent — safe to run on every load.
    */
   async function migrate() {
     try {
+      assertStorageAvailable();
       const result = await chrome.storage.local.get([SCHEMA_KEY, SETTINGS_KEY]);
       const toWrite = {};
 
@@ -75,6 +89,7 @@ const storageManager = (() => {
    * or null if no entry exists.
    */
   async function getProgress(videoId) {
+    assertStorageAvailable();
     const result = await chrome.storage.local.get(STORAGE_KEY);
     const store = result[STORAGE_KEY] ?? {};
     return store[videoId] ?? null;
@@ -84,6 +99,7 @@ const storageManager = (() => {
    * Returns the full videoId -> VideoProgress map.
    */
   async function getAllProgress() {
+    assertStorageAvailable();
     const result = await chrome.storage.local.get(STORAGE_KEY);
     return result[STORAGE_KEY] ?? {};
   }
@@ -98,6 +114,7 @@ const storageManager = (() => {
    *   good title from an earlier save already exists (D-016).
    */
   async function saveProgress(videoId, time, duration, title) {
+    assertStorageAvailable();
     const result = await chrome.storage.local.get(STORAGE_KEY);
     const store = result[STORAGE_KEY] ?? {};
     const existing = store[videoId];
@@ -131,6 +148,7 @@ const storageManager = (() => {
    * Handles missing keys gracefully (no-op if absent).
    */
   async function deleteProgress(videoId) {
+    assertStorageAvailable();
     const result = await chrome.storage.local.get(STORAGE_KEY);
     const store = result[STORAGE_KEY] ?? {};
     delete store[videoId];
@@ -142,6 +160,7 @@ const storageManager = (() => {
    * and youtubeResumeSchema untouched (PRD §7.4).
    */
   async function clearAllProgress() {
+    assertStorageAvailable();
     await chrome.storage.local.remove(STORAGE_KEY);
   }
 
