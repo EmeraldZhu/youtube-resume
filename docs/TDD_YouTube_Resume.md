@@ -7,10 +7,10 @@
 |---|---|
 | **Product** | YouTube Resume |
 | **Document Type** | Technical Design Document (TDD) |
-| **Version** | 1.0.0 |
-| **Status** | Draft — Ready for Implementation |
+| **Version** | 2.0.0 |
+| **Status** | Reconciled against shipped v2.0.0 code (Phase 9, D-030) |
 | **Last Updated** | 2026-07-27 |
-| **Companion Document** | PRD_YouTube_Resume.md v1.0.0 |
+| **Companion Document** | PRD_YouTube_Resume.md v2.0.0 |
 
 ---
 
@@ -44,7 +44,12 @@
 
 ## 1. System Overview
 
-YouTube Resume is implemented entirely as a **Manifest V3 Chrome content script**. There is no background service worker, no popup, and no options page in v1.0. All logic runs within the YouTube page context, isolated by Chrome's default content script sandbox.
+YouTube Resume is implemented as a **Manifest V3 Chrome content script plus a popup**. There is no
+background service worker and no options page. Resume/tracking logic runs entirely within the
+YouTube page context, isolated by Chrome's default content script sandbox; the popup (Phases 6–8)
+is a separate document (`popup/popup.html`, opened via `action.default_popup`) that never runs in
+page context and talks to storage only through `storage/storageManager.js` (D-044) — it holds two
+views, the saved-videos list (default) and settings, never a background page or a new tab (D-008).
 
 ### 1.1 Core Architecture Principle
 
@@ -69,8 +74,8 @@ bootstrap.js
 | Host page | `https://www.youtube.com/*` |
 | `run_at` | `document_idle` |
 | Background script | None required |
-| Popup | None in v1.0 |
-| Options page | None in v1.0 |
+| Popup | `popup/popup.html` — saved-videos list + settings, two views in one popup document (v2, Phases 6/8) |
+| Options page | None — settings live inside the popup, not a `chrome://extensions` options page (D-008) |
 
 ### 1.3 Key Environmental Constraints
 
@@ -100,24 +105,27 @@ youtube-resume/
 │   └── storageManager.js       # chrome.storage.local abstraction
 │
 ├── utils/
-│   ├── youtubeUtils.js         # URL parsing, videoId extraction
+│   ├── debugLogger.js          # DEBUG-gated tracing (Phase 1+, §7.1); no-op unless DEBUG = true
+│   ├── youtubeUtils.js         # URL parsing, videoId extraction, title/channel capture (v2)
 │   └── timeUtils.js            # Threshold math, resume calculations
 │
 ├── popup/                      # v2 — Phase 6 (settings) / Phase 8 (saved videos list)
 │   ├── popup.html              # Two views: #view-list (default), #view-settings
 │   ├── popup.js                # List rendering + settings wiring; no storage logic of its own
-│   └── popup.css               # 360px fixed width, 560px max height (UX Spec §6.2)
+│   └── popup.css               # 360px fixed width, 560px max height (UX Spec §6.2, D-010)
 │
 └── assets/
     └── icons/
-        ├── icon16.png
-        ├── icon48.png
-        └── icon128.png
+        ├── icon-16.png
+        ├── icon-48.png
+        └── icon-128.png
 ```
 
 **Design rationale:**
 - `content/` contains all runtime logic that executes in-page
-- `storage/` is isolated to make it independently testable and swappable
+- `storage/` is isolated to make it independently testable and swappable — as of Phase 4 it is also
+  loaded by `popup/popup.js`, making it the sole owner of `chrome.storage.local` across both
+  contexts (D-044), not just the content script
 - `utils/` contains only pure functions — no side effects, no DOM access, no storage calls
 
 ---
@@ -140,9 +148,14 @@ This flow executes once on cold load, and repeats from step 2 on every SPA navig
 3. navigationManager emits: onVideoChange(videoId)
         │
         ▼
+3.5. bootstrap reads storageManager.getSettings() once for this navigation (Phase 7, D-049)
+   └── On rejection, falls back to storageManager.getDefaultSettings() (sync, no storage access)
+   └── Passed down to both tryResume() and progressTracker.start() below — neither re-reads it
+        │
+        ▼
 4. playerObserver.waitForVideo()
-   └── MutationObserver on #movie_player
-   └── Resolves Promise<HTMLVideoElement> when <video> appears
+   └── MutationObserver on document.body, resolving once #movie_player > video exists (D-023)
+   └── Resolves Promise<HTMLVideoElement>
    └── Rejects after 10s timeout
         │
         ▼
@@ -152,17 +165,23 @@ This flow executes once on cold load, and repeats from step 2 on every SPA navig
         ├── [null] → skip to step 7
         │
         ▼
-6. resumeManager.tryResume(video, savedProgress)
-   └── Validates resume conditions
-   └── Waits 400ms
-   └── Sets video.currentTime = resumeTime
-   └── Calls uiInjector.showRestartButton(video, videoId)
+6. resumeManager.tryResume(video, savedProgress, videoId, settings)
+   └── Rejects saved.time below minWatchSeconds before paying for the metadata wait (D-038/D-043)
+   └── Waits for video.duration (loadedmetadata, one retry) and re-checks shouldResume()
+   └── Defers until no ad is showing/interrupting, re-deferring if one starts mid-delay (D-019/D-040)
+   └── Waits 400ms, baselined for a 10s drift-tolerant abort guard (D-021/D-037)
+   └── Sets video.currentTime = resumeTime, verifies within 3s over up to 3 attempts (D-022)
+   └── Only on a verified seek: uiInjector.showRestartButton() / showToast(), each settings-gated
         │
         ▼
-7. progressTracker.start(video, videoId)
-   └── Registers interval + event listeners
-   └── Saves progress via storageManager on each trigger
+7. progressTracker.start(video, videoId, settings)
+   └── Registers event listeners (pause, seeked, ended, visibilitychange, pagehide); 5s save
+       cadence rides navigationManager's tick (D-059), no interval of its own
+   └── Saves progress via storageManager on each trigger, subject to the guards in §3.3
 ```
+
+See §4.4/§4.5 for the full logic each step above is a summary of — this diagram shows sequencing,
+not every guard.
 
 ### 3.2 Teardown Flow
 
@@ -170,7 +189,7 @@ Executed at the start of each new `onVideoChange` call, before re-initialization
 
 ```
 progressTracker.stop()
-    └── clearInterval(intervalId)
+    └── ticksSinceSave = 0 (D-059 — no interval to clear)
     └── Removes all event listeners (pause, seeked, ended, visibilitychange, pagehide)
 
 uiInjector.cleanup()
@@ -191,7 +210,8 @@ progressTracker reads video.currentTime
         │
         ▼
 Guard: adPlaying? liveStream (duration === Infinity)? invalid position
-       (NaN / negative / > duration)?
+       (NaN current/duration, negative, or current > duration — D-042/D-043)?
+       below minWatchSeconds (settings, captured once in start() — D-050)?
         │
     YES │  NO
     │   │
@@ -284,7 +304,7 @@ async function onVideoChange(videoId) {
   }
 }
 
-navigationManager.start(onVideoChange);
+navigationManager.start(onVideoChange, () => progressTracker.tick());
 ```
 
 #### Error Behavior
@@ -304,15 +324,21 @@ including transitions to and from a non-watch page.
 #### Public API
 
 ```typescript
-navigationManager.start(onVideoChange: (videoId: string | null) => void): void
+navigationManager.start(onVideoChange: (videoId: string | null) => void, onTick?: () => void): void
 navigationManager.stop(): void
 ```
+
+`onTick`, added Phase 9 (D-059), is invoked on every 1000ms poll beat regardless of whether a
+navigation occurred. It exists so `progressTracker` can clock its 5s save cadence off this single
+interval instead of owning a second one — `navigationManager` remains the sole `setInterval` owner
+in the whole content script, matching CLAUDE.md's constraint literally.
 
 #### Internal State
 
 ```typescript
 let currentVideoId: string | null = null;
 let fallbackPollInterval: number | null = null;
+let onTickCallback: (() => void) | null = null;
 ```
 
 #### Detailed Logic
@@ -580,12 +606,18 @@ async function tryResume(video, saved, videoId, settings = {}) {
 ```typescript
 progressTracker.start(video: HTMLVideoElement, videoId: string, settings: Settings): void
 progressTracker.stop(): void
+progressTracker.tick(): void
 ```
+
+`tick()`, added Phase 9 (D-059), is called once per 1000ms by `navigationManager`'s existing poll
+interval (wired through `bootstrap.js`) rather than `progressTracker` owning its own `setInterval`.
+It no-ops when tracking isn't active, and fires `attemptSave(false, 'interval')` every 5th call —
+preserving the original 5000ms cadence exactly, just clocked externally.
 
 #### Internal State
 
 ```typescript
-let intervalId: number | null = null;
+let ticksSinceSave: number = 0;     // Phase 9 (D-059) — replaces intervalId
 let lastSavedTime: number = 0;
 let activeVideo: HTMLVideoElement | null = null;
 let activeVideoId: string | null = null;
@@ -596,7 +628,7 @@ let minWatchSeconds: number = 30;   // Phase 7 — captured once in start(), nev
 
 **`start(video, videoId, settings)`:** Phase 7 (Roadmap 7.3) — `settings.minWatchSeconds` is
 captured into module state here, once per navigation, and reused by every `attemptSave()` call
-including the 5-second interval. It is never re-read from storage inside the interval.
+including the interval-equivalent trigger. It is never re-read from storage inside `tick()`.
 
 ```javascript
 function start(video, videoId, settings = {}) {
@@ -604,9 +636,10 @@ function start(video, videoId, settings = {}) {
   activeVideoId = videoId;
   minWatchSeconds = settings.minWatchSeconds ?? 30;
   lastSavedTime = video.currentTime;
+  ticksSinceSave = 0;
 
-  // Core interval — the only trigger the delta guard applies to (D-024)
-  intervalId = setInterval(() => attemptSave(false, 'interval'), 5000);
+  // No setInterval here (D-059) — tick() is called externally, once per
+  // 1000ms, by navigationManager's existing poll interval via bootstrap.js.
 
   // Event-based triggers — all bypass the delta guard (D-024)
   video.addEventListener('pause',  handlePause);
@@ -615,6 +648,20 @@ function start(video, videoId, settings = {}) {
   document.addEventListener('visibilitychange', handleVisibility);
   // pagehide, not beforeunload (D-025) — see §5.4/§7.2, best-effort only
   window.addEventListener('pagehide', handlePagehide);
+}
+```
+
+**`tick()`:** *(new in v2.0, Phase 9, D-059)* — called once per 1000ms by `navigationManager`'s
+poll; a no-op unless tracking is active.
+
+```javascript
+function tick() {
+  if (!activeVideo || !activeVideoId) return;
+  ticksSinceSave += 1;
+  if (ticksSinceSave >= 5) {
+    ticksSinceSave = 0;
+    attemptSave(false, 'interval');
+  }
 }
 ```
 
@@ -638,7 +685,12 @@ function attemptSave(bypassDelta, trigger) {
   if (!bypassDelta && Math.abs(current - lastSavedTime) < 5) return; // delta guard — interval only
 
   lastSavedTime = current;
-  storageManager.saveProgress(activeVideoId, current, duration)
+  // Captured fresh on every save, not cached in module state — a title/channel
+  // capture miss preserves the previously stored value (D-016/D-045), it does
+  // not block or delay the save itself.
+  const title = youtubeUtils.getTitle();
+  const channel = youtubeUtils.getChannelName();
+  storageManager.saveProgress(activeVideoId, current, duration, title, channel)
     .catch(err => console.warn('[YTResume] Save failed:', err.message));
 }
 ```
@@ -661,8 +713,7 @@ function attemptSave(bypassDelta, trigger) {
 
 ```javascript
 function stop() {
-  clearInterval(intervalId);
-  intervalId = null;
+  ticksSinceSave = 0;
 
   if (activeVideo) {
     activeVideo.removeEventListener('pause',  handlePause);
@@ -742,6 +793,12 @@ non-videoId key would corrupt both counting and eviction (D-013).
 
 #### Detailed Logic
 
+**D-048:** every public function below begins with `assertStorageAvailable()`, a guard that throws
+a descriptive error (`"chrome.storage unavailable — extension context invalidated, reload the
+page"`) instead of letting `chrome.storage.local` being `undefined` surface as a bare `TypeError`.
+Omitted from the pseudocode blocks below for brevity — behavior is otherwise identical, callers
+still just see a rejected promise, caught the same way as any other storage failure (§7.2).
+
 **`getProgress(videoId)`:**
 
 ```javascript
@@ -761,10 +818,10 @@ async function getAllProgress() {
 }
 ```
 
-**`saveProgress(videoId, time, duration, title)`:**
+**`saveProgress(videoId, time, duration, title, channel)`:**
 
 ```javascript
-async function saveProgress(videoId, time, duration, title) {
+async function saveProgress(videoId, time, duration, title, channel) {
   const result = await chrome.storage.local.get(STORAGE_KEY);
   const store = result[STORAGE_KEY] ?? {};
   const existing = store[videoId];
@@ -775,11 +832,18 @@ async function saveProgress(videoId, time, duration, title) {
     updated: Math.floor(Date.now() / 1000),
   };
 
-  // A missing/failed title capture preserves any previously stored
-  // title rather than erasing it (D-016).
+  // A missing/failed title or channel capture preserves any previously
+  // stored value rather than erasing it (D-016/D-045). channel has no
+  // document.title fallback (D-056), so a transient DOM-selector miss on
+  // it is more likely, not less — the same preserve-if-omitted rule covers it.
   const resolvedTitle = title ? title.slice(0, MAX_TITLE_LENGTH) : existing?.title;
   if (resolvedTitle) {
     entry.title = resolvedTitle;
+  }
+
+  const resolvedChannel = channel ? channel.slice(0, MAX_TITLE_LENGTH) : existing?.channel;
+  if (resolvedChannel) {
+    entry.channel = resolvedChannel;
   }
 
   store[videoId] = entry;
@@ -1242,10 +1306,11 @@ This table defines what each module **consumes** and what it **produces**. No mo
 | `playerObserver.js` | *(DOM only)* | `bootstrap.js`, `progressTracker.js` |
 | `resumeManager.js` | `timeUtils.js`, `uiInjector.js` | `bootstrap.js` |
 | `progressTracker.js` | `storageManager.js`, `playerObserver.js` | `bootstrap.js` |
-| `storageManager.js` | *(chrome.storage.local only)* | `resumeManager.js`, `progressTracker.js`, `uiInjector.js` |
+| `storageManager.js` | *(chrome.storage.local only)* | `resumeManager.js`, `progressTracker.js`, `uiInjector.js`, `popup/popup.js` |
 | `uiInjector.js` | `storageManager.js` | `resumeManager.js` |
-| `youtubeUtils.js` | *(window.location only)* | `navigationManager.js`, `bootstrap.js` |
-| `timeUtils.js` | *(no dependencies)* | `resumeManager.js` |
+| `youtubeUtils.js` | *(window.location, document.title/DOM)* | `navigationManager.js`, `bootstrap.js`, `progressTracker.js` (title/channel capture, v2) |
+| `timeUtils.js` | *(no dependencies)* | `resumeManager.js`, `progressTracker.js` (v2, D-050) |
+| `popup/popup.js` *(v2 — Phases 6/8)* | `storageManager.js` | Nothing (leaf; runs in its own document, never in page context) |
 
 ---
 
@@ -1259,7 +1324,8 @@ There is no global state object. Each module manages its own internal state priv
 |---|---|---|---|
 | `currentVideoId` | `navigationManager` | On `yt-navigate-finish` | On next navigation |
 | Active `MutationObserver` | `playerObserver` | On `waitForVideo()` call | On `disconnect()` |
-| `intervalId` | `progressTracker` | On `start()` | On `stop()` |
+| `fallbackPollInterval` | `navigationManager` | On `start()` | On `stop()` — sole `setInterval` in the extension (D-059) |
+| `ticksSinceSave` *(v2 — Phase 9, D-059)* | `progressTracker` | On `start()` | On `stop()` |
 | `lastSavedTime` | `progressTracker` | On `start()` | On `stop()` |
 | `minWatchSeconds` *(v2 — Phase 7)* | `progressTracker` | On `start()`, from `settings` param | On `stop()`, back to the 30s default |
 | `buttonElement` | `uiInjector` | On `showRestartButton()` | On `cleanup()` or click |
@@ -1345,12 +1411,13 @@ These selectors are subject to change if YouTube updates its player markup. If a
 
 | Metric | Limit | Implementation |
 |---|---|---|
-| Active interval timers | **1 max** | `progressTracker` owns the sole `setInterval` |
+| Active interval timers | **1 max** | `navigationManager` owns the sole `setInterval` (1s URL-polling fallback, permanent for the life of the content script). `progressTracker` has no interval of its own — its 5s save cadence rides on `navigationManager`'s tick via `progressTracker.tick()`, counting to 5 (D-059, fixed Phase 9; a pre-v2 second interval existed until then) |
 | Active MutationObservers | **1 max** | `playerObserver` disconnects after video found |
 | `chrome.storage.local` writes/min | **≤ 12** | One per 5s interval; capped by delta guard |
-| DOM elements injected | **1** | Restart button only; auto-removed |
+| DOM elements injected | **2 max** | Restart button + toast (v2 — D-029 promoted the toast from optional to required); both auto-removed, independently settings-gated |
 | Memory footprint | **< 5MB** | No large data structures; storage capped at 200 entries |
-| Network requests | **0** | Strictly prohibited |
+| Network requests (content script) | **0** | Strictly prohibited — unchanged in v2 |
+| Network requests (popup) | **≤ 1 per visible thumbnail** | `<img src>` GET to `i.ytimg.com` only, only when `loadThumbnails` is on (D-004/D-005/D-006) — the only network request permitted anywhere in the extension |
 | External scripts | **0** | No CDN dependencies |
 | CPU overhead | **Negligible** | No animation loops, no heavy computation |
 
@@ -1358,7 +1425,9 @@ These selectors are subject to change if YouTube updates its player markup. If a
 
 ## 10. Implementation Order
 
-Modules should be implemented in the following sequence to allow incremental testing at each step. Each phase is independently verifiable before proceeding.
+This is the original v1.0 build sequence — module-by-module, not the same "Phase" numbering as
+`docs/ROADMAP_v2.md`'s nine v2.0.0 phases. Kept as a historical record of build order; it is not a
+re-statement of the v2.0.0 roadmap. Modules should be implemented in the following sequence to allow incremental testing at each step. Each phase is independently verifiable before proceeding.
 
 | Phase | Modules | Verification |
 |---|---|---|
@@ -1374,6 +1443,12 @@ Modules should be implemented in the following sequence to allow incremental tes
 ---
 
 ## 11. Testing Strategy
+
+There is no test runner in this project (CLAUDE.md) — every table below is a manual verification
+script, run in Chrome via Load Unpacked. §11.3 is the original v1.0 regression baseline and is kept
+as-is; §11.1/§11.2 gain v2 rows below for the modules/scenarios that didn't exist in v1.0 (settings,
+saved videos panel, title/channel capture). Nothing in the added rows contradicts §11.3 — they cover
+net-new surface area, not replacements.
 
 ### 11.1 Unit Tests (Pure Modules)
 
@@ -1394,6 +1469,13 @@ Target: `youtubeUtils.js`, `timeUtils.js`, `storageManager.js`
 | `storageManager` | Eviction | Insert 201 entries | Only 200 remain; oldest removed |
 | `storageManager` | Delete | Save then delete videoId | `getProgress() → null` |
 | `storageManager` | Missing key | `getProgress('nonexistent')` | Returns `null` |
+| `timeUtils` *(v2)* | Minimum-watched short-circuit | `meetsMinimumWatched(20, 30)` | `false` — rejects before any duration is known (D-038/D-043) |
+| `youtubeUtils` *(v2)* | Title suffix strip | `document.title = "My Video - YouTube"` | `getTitle() → "My Video"` |
+| `youtubeUtils` *(v2)* | Title notification-count strip | `document.title = "(3) My Video - YouTube"` | `getTitle() → "My Video"` (D-057) |
+| `youtubeUtils` *(v2)* | Title parenthetical preserved | `document.title = "(Official Video) - YouTube"` | Leading `(Official Video)` is **not** stripped — only a digit-only prefix matches (D-057) |
+| `storageManager` *(v2)* | Settings merge over defaults | `getSettings()` with no stored key | Returns `DEFAULT_SETTINGS` verbatim |
+| `storageManager` *(v2)* | Settings self-heal | `youtubeResumeSettings` manually set to a string | `getSettings()` still returns a full valid `Settings` object |
+| `storageManager` *(v2)* | Title/channel preserved on omission | `saveProgress(id, t, d)` after a prior save had a title | Existing `title`/`channel` untouched (D-016/D-045) |
 
 ### 11.2 Integration Test Scenarios
 
@@ -1411,6 +1493,11 @@ Target: `youtubeUtils.js`, `timeUtils.js`, `storageManager.js`
 | I10 | SPA navigation | Navigate from video A to video B | A's tracking stops; B's tracking starts |
 | I11 | Ad handling | Video with pre-roll ad | Resume fires after ad; ad progress not tracked |
 | I12 | Multiple tabs | Open same video in two tabs | Last-write-wins; no crash |
+| I13 *(v2)* | Ad starts mid-resume-delay | Trigger an ad that begins during the 400ms resume delay | Resume re-defers to the ad wait and re-baselines, up to 3 rounds, instead of aborting (D-040) |
+| I14 *(v2)* | Settings change, existing tab | Change `minWatchSeconds` in the popup while a video tab is open | No effect on that tab until its next navigation (§6.2) — takes effect on next video load, not live |
+| I15 *(v2)* | Saved videos panel — remove | Open popup, click remove on a row | Row disappears immediately; entry deleted from `youtubeResume`; no full re-render (T8.9) |
+| I16 *(v2)* | Saved videos panel — thumbnails off | Turn off `loadThumbnails`, reopen popup | No `<img>` elements exist in any row; zero `i.ytimg.com` requests (T8.8) |
+| I17 *(v2)* | Clear vs. Reset key independence | `Clear saved progress`, then check settings | `youtubeResume` empty; `youtubeResumeSettings` unchanged (T6.7); reverse also holds for `Reset to defaults` (T6.9) |
 
 ### 11.3 Manual QA Checklist
 
@@ -1470,15 +1557,22 @@ Target: `youtubeUtils.js`, `timeUtils.js`, `storageManager.js`
 | **`chrome.storage.local` from content scripts** | Fully supported in content scripts under MV3. No messaging to a background worker required. |
 | **CSP restrictions** | No inline `<script>` injection. All DOM manipulation uses `document.createElement`. |
 
-### 12.3 Known Limitations (v1.0)
+### 12.3 Known Limitations (v2.0)
 
 | Limitation | Accepted? | Future Fix |
 |---|---|---|
-| Up to 5 seconds of progress can be lost on unclean shutdown | ✅ Accepted | Reduce interval (v2 consideration) |
-| Restart button may not inject if YouTube restructures `.ytp-time-display` | ✅ Accepted | Selector monitoring in v2 |
+| Up to 5 seconds of progress can be lost on unclean shutdown | ✅ Accepted | The 5s interval stays hard-coded by design in v2 (D-007) — not user-configurable, not reduced |
+| Restart button may not inject if YouTube restructures `.ytp-time-display` | ✅ Accepted | Selector monitoring; re-measured once against live DOM in Phase 5 (`YT_DOM_AUDIT.md`), not automated |
 | No cross-device sync | ✅ Accepted | `chrome.storage.sync` or backend in future |
 | Last-write-wins on multi-tab (no conflict resolution) | ✅ Accepted | Sufficient for typical use |
+| A setting changed in the popup does not take effect on an already-open YouTube tab until its next navigation | ✅ Accepted | No message-passing/storage-listener push exists by design (§6.2) |
+| Thumbnail `<img>` requests to `i.ytimg.com` break the v1.0 absolute zero-network claim | ✅ Accepted, has an off switch | `loadThumbnails` setting, default on (D-004/D-005); privacy policy/store listing updates still **OPEN** (D-032/D-033), due before publishing, not before Phase 9 |
 
 ---
 
-*This document is the authoritative technical specification for YouTube Resume v1.0. All implementation decisions should trace back to requirements defined in the companion PRD. Discrepancies between this TDD and the PRD must be resolved in the PRD first, then reflected here.*
+*This document is the authoritative technical specification for YouTube Resume v2.0.0, reconciled
+against shipped code in Phase 9 (D-030). Per CLAUDE.md's precedence rules, this TDD outranks the UX
+Spec, Roadmap, and PRD for implementation detail — but shipped code outranks all four; where a future
+discrepancy is found, fix the code-affecting doc and log a Tier 2 decision in `DECISIONS.md`, don't
+silently drift. §11.3's v1.0 manual QA checklist is kept intact as the regression baseline (see
+§11 intro) — nothing elsewhere in this document should be read as superseding it.*

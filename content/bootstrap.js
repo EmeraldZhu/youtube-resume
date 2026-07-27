@@ -68,8 +68,10 @@
    * Initializes the extension. Self-executing on inject.
    */
   function init() {
-    navigationManager.start(onVideoChange);
-
+    // navigationManager owns the single 1000ms interval (D-059); its tick
+    // also drives progressTracker's 5s save cadence, so only one setInterval
+    // is ever alive.
+    navigationManager.start(onVideoChange, () => progressTracker.tick());
   }
 
   init();

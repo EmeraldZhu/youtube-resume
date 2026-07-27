@@ -9,63 +9,60 @@
 
 | Phase | Name | Status | Blocked By |
 |---|---|---|---|
-| 0 | Phase 0 — Guardrails & Tracking Setup | DONE | — |
-| 1 | Reliability Audit & Instrumentation | DONE | — |
-| 2 | Resume Engine Hardening | DONE | — |
-| 3 | Progress Tracking Hardening | DONE | — |
-| 4 | Storage Schema v2, Title Capture & Migration | DONE | — |
+| 0–4 | Guardrails through Storage Schema v2 | DONE | — |
 | 5 | In-Player UI Re-Calibration | AWAITING VERIFICATION | — |
-| 6 | Settings Store & Settings Panel | DONE | — |
-| 7 | Wire Settings Into Runtime | DONE | — |
+| 6–7 | Settings Store & Runtime Wiring | DONE | — |
 | 8 | Saved Videos Panel | AWAITING VERIFICATION | — |
-| 9 | Integration, Regression & Store Resubmission | NOT STARTED | D-032, D-033 |
+| 9 | Integration, Regression & Store Resubmission | AWAITING VERIFICATION | D-032, D-033 |
 
-**Status values:** NOT STARTED · IN PROGRESS · BLOCKED · AWAITING VERIFICATION · DONE
+**Status values:** NOT STARTED · IN PROGRESS · BLOCKED · AWAITING VERIFICATION · DONE.
+A phase is `DONE` only when the owner confirms it. Claude Code never writes `DONE` itself.
 
-A phase is `DONE` only when the owner has run its verification checklist and confirmed it.
-`AWAITING VERIFICATION` means the code is written but unconfirmed — **that is not done.**
-Claude Code never writes `DONE` itself.
+## Phase 9 — what's done vs. outstanding
 
-## Shipped state (v1.0.0)
+**Done:** instrumentation confirmed off (DEBUG=false, all logging gated); copy audited clean against
+UX Spec §7 (no drift); permissions/network audits clean (only `i.ytimg.com` thumbnail GET, gated on
+`loadThumbnails`); manifest bumped to `2.0.0`; Dev Checklist §6.2 arithmetic fixed (D-031); TDD
+brought to v2.0.0, reconciled against shipped code (D-030); PRD/UX Spec/Dev Checklist confirmed
+already current. Privacy policy and store listing **drafted** (not published) at
+`docs/PRIVACY_POLICY_DRAFT.md` / `docs/STORE_LISTING_DRAFT.md` — D-032/D-033 remain OPEN, owned by
+Human. D-059: live-testing found two concurrent `setInterval`s (pre-existing since v1.0, not a v2
+regression) — **fixed**, not just documented: `progressTracker` no longer owns a timer, it clocks
+its 5s save cadence off `navigationManager`'s existing 1s poll via a new `tick()` method. Only one
+`setInterval` is alive anywhere in the extension now, matching CLAUDE.md's constraint literally.
+**Live-verified** post-fix: resume still seeks correctly (198 from a 200s save, drift 0), and the
+interval-trigger save fired ~30 times over 131s (≈1 per 4.4s, matching the 5s cadence) — confirmed
+via a temporary `DEBUG=true` flip, reverted before finishing (never committed true).
 
-All 13 source files implemented and loading cleanly: 9 content/storage/utils modules, 3 popup files,
-`manifest.json`. Extension loads via Load Unpacked without errors.
+**Live-tested and passing:** T9.2 (fresh install), T9.6 (10/10 cold-load resume), T9.8 (silent on
+Shorts/live/embed/playlist/homepage), T9.9 (disable mid-session), T9.10 (zip reload).
+**Partial:** T9.5 (v1.0 regression — several items covered opportunistically, several not
+re-verified this pass); T9.7 (SPA-nav resume — 2/4 clean, 2 explained by real ads mid-test, smaller
+sample than planned).
+**Not completed — needs a follow-up session:** Restart-button click-clears-storage-and-seeks-to-0
+check (was interrupted mid-verification, inconclusive result, needs re-run with the sampler
+technique); T9.3 dedicated 5–10min soak with memory sampling; T9.4 25-navigation stress run (only
+code-reviewed, not live-stress-tested, ~20 navigations covered incidentally with no errors).
+**Owner-only, not attempted:** T9.1 — upgrading a real v1.0.0 profile with real saved data. Requires
+the owner's actual browser profile.
+**Housekeeping:** synthetic test entries left by live-testing have been cleared from
+`chrome.storage.local` on the dev-loaded extension.
 
-**Working:** navigation detection (SPA, cold load, polling fallback), player detection, storage
-read/write/delete/eviction, progress tracking (interval + events), Restart button, resume toast,
-v1.0 popup, bootstrap orchestration.
+## Shipped state (v1.0.0 → v2.0.0)
 
-**Known broken — remaining reasons for v2.0.0:**
-- Resume reliability (Phase 2) and progress tracking (Phase 3) fixed, owner-verified: ad gating,
-  drift guard, verified seek, `ended` handler, `pagehide` over `beforeunload`, invalid-position
-  guards (D-019 through D-025, D-036 through D-038, D-040 through D-043).
-- Restart button/toast visuals re-calibrated against measured live DOM (Phase 5, awaiting
-  verification): runtime-derived toast offset and pill fill (D-027/D-028/D-046).
-- Settings panel built and owner-verified (Phase 6): second popup view, six controls, Clear/Reset
-  with key independence confirmed (T6.7/T6.9).
-- Settings wired into runtime, owner-verified (Phase 7): thresholds are arguments (D-049); saves
-  below `minWatchSeconds` skipped (D-050); settings-read failure falls back to defaults silently.
-  T7.1–T7.11 run live via `chrome-devtools-mcp` (D-051/D-052).
-- Saved videos panel built, awaiting verification (Phase 8): `#view-list` renders every entry via
-  `document.createElement` only (T8.13). Thumbnails gated on `loadThumbnails` — the `<img>` element
-  itself doesn't exist when off (T8.8 zero requests, verified live). Per-row remove deletes in
-  place (T8.9). List region clamps via static `max-height`, not flexbox `flex:1` (D-053 — the flex
-  approach silently failed to clamp). T8.1–T8.12, T8.14 run live via `chrome-devtools-mcp` against
-  seeded 200-entry storage; T8.4 confirmed on a real open YouTube tab.
-- Post-Phase-8 owner-requested polish, verified live: title capture strips a leading `(3)`-style
-  notification-count prefix (D-057); schema gains optional `channel`, captured via new
-  `youtubeUtils.getChannelName()` (D-056); thumbnail grows 120×68 → 144×81 (D-055) and gains a
-  YouTube-style duration badge + watched-progress line that render even with thumbnails off, since
-  they're text/CSS, not an image (D-054); header gains a centered icon-only Ko-fi link, inline SVG
-  rather than a second emoji exception (D-058, CP-61).
+All 13 v1.0 source files plus popup's second (settings) view, saved-videos panel, and settings
+store. Resume reliability hardened (ad gating, drift guard, verified seek, retry on metadata
+timeout — Phases 1–3, owner-verified). In-player UI re-calibrated against measured live DOM (Phase
+5, awaiting verification). Settings store + panel + runtime wiring done and owner-verified (Phases
+6–7). Saved videos panel with thumbnails/duration/progress overlays, channel name, Ko-fi link (Phase
+8 + polish, awaiting verification). Full decision history in `docs/DECISIONS.md`.
 
 ## Next action
 
-Phase 5 awaiting owner verification (T5.1–T5.12, see phase report). Phases 6–7 DONE. Phase 8
-(saved videos panel) awaiting owner verification (T8.1–T8.14, see phase report). Phase 9 next up.
-D-034 (ship reliability as a v1.1 patch?) remains OPEN, owned by Human.
+Owner: run T9.1 (real v1.0 profile upgrade) and verify Phases 5/8/9. A follow-up session should
+close the remaining Phase 9 test gaps listed above before final sign-off. See the release checklist
+handed over alongside this summary.
 
 ## Doc versions
 
-PRD 2.0.0 · UX Spec 2.0.0 · Roadmap 2.0.0 · **TDD still 1.0.0** (updated per phase, reaches 2.0.0 in
-Phase 9 — see D-030; treat as stale for anything Phase 2+ has changed).
+PRD 2.0.0 · UX Spec 2.0.0 · Roadmap 2.0.0 · **TDD 2.0.0** (reconciled Phase 9, D-030 closed).

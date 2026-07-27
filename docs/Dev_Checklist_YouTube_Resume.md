@@ -303,7 +303,7 @@ Implement per TDD §4.4:
 - [ ] Waits for `loadedmetadata` if `video.duration` is `NaN` or `0` at call time, with a 5-second timeout
 - [ ] If `shouldResume` returns `false`, exits silently without seeking or injecting UI
 - [ ] Applies a fixed `400ms` delay before seeking (per TDD §4.4 `RESUME_DELAY_MS`)
-- [ ] After delay, checks if `video.currentTime > 5`; if true, aborts (user already seeked manually)
+- [ ] After delay, compares `video.currentTime` against a pre-delay baseline with a 10s drift tolerance; if exceeded, aborts (user already seeked manually — D-021)
 - [ ] Sets `video.currentTime = timeUtils.getResumeTime(saved.time)`
 - [ ] Calls `uiInjector.showRestartButton(video, videoId)` only if seek succeeds
 - [ ] Catches and logs any exception from `video.currentTime` assignment without rethrowing
@@ -317,7 +317,7 @@ Manually write test entries to storage using `storageManager.saveProgress()`, th
 - [ ] `savedTime=1200, duration=3600` → video seeks to `1198` after ~400ms
 - [ ] `savedTime=20, duration=3600` → no seek occurs (below minimum)
 - [ ] `savedTime=3420, duration=3600` → no seek occurs (above completion threshold)
-- [ ] `savedTime=100, duration=200` → no seek occurs (above 95% threshold: 100/200 = 50%... recalculate — this should resume)
+- [ ] `savedTime=100, duration=200` → resumes to `98` (`shouldResume(100, 200)` is `true`: 100 < 190, the 95% completion threshold — D-031)
 - [ ] After seek, `video.currentTime` equals `resumeTime` within ±1 second
 - [ ] If user manually seeks during the 400ms delay window, resume does not override their position
 - [ ] No errors appear in console for any scenario

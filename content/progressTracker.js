@@ -7,10 +7,15 @@
  * Public API:
  *   progressTracker.start(video, videoId, settings) → void
  *   progressTracker.stop()                          → void
+ *   progressTracker.tick()                          → void
  */
 
 const progressTracker = (() => {
-  let intervalId = null;
+  // No setInterval of its own (D-059) — navigationManager already runs a
+  // permanent 1000ms poll for the life of the content script; tick() rides
+  // on that instead of a second concurrent interval. ticksSinceSave counts
+  // to 5 to preserve the original 5000ms save cadence exactly.
+  let ticksSinceSave = 0;
   let lastSavedTime = 0;
   let activeVideo = null;
   let activeVideoId = null;
@@ -89,9 +94,7 @@ const progressTracker = (() => {
     activeVideoId = videoId;
     minWatchSeconds = settings.minWatchSeconds ?? 30;
     lastSavedTime = Math.floor(video.currentTime);
-
-    // Core interval — every 5 seconds
-    intervalId = setInterval(() => attemptSave(false, 'interval'), 5000);
+    ticksSinceSave = 0;
 
     // Event-based triggers — all save unconditionally (D-024)
     handlePause = () => attemptSave(true, 'pause');
@@ -112,15 +115,25 @@ const progressTracker = (() => {
   }
 
   /**
-   * Clears the interval, removes all event listeners, and resets
-   * internal state. Idempotent — safe to call multiple times or
-   * before start().
+   * Advances the tick counter by one 1000ms beat (driven by
+   * navigationManager's poll interval, D-059) and fires attemptSave every
+   * 5th tick — a no-op when tracking isn't active.
+   */
+  function tick() {
+    if (!activeVideo || !activeVideoId) return;
+    ticksSinceSave += 1;
+    if (ticksSinceSave >= 5) {
+      ticksSinceSave = 0;
+      attemptSave(false, 'interval');
+    }
+  }
+
+  /**
+   * Removes all event listeners and resets internal state. Idempotent —
+   * safe to call multiple times or before start().
    */
   function stop() {
-    if (intervalId !== null) {
-      clearInterval(intervalId);
-      intervalId = null;
-    }
+    ticksSinceSave = 0;
 
     if (activeVideo) {
       if (handlePause) activeVideo.removeEventListener('pause', handlePause);
@@ -142,7 +155,7 @@ const progressTracker = (() => {
     minWatchSeconds = 30;
   }
 
-  return { start, stop };
+  return { start, stop, tick };
 })();
 
 

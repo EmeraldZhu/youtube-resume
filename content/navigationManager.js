@@ -5,14 +5,15 @@
  * a normalized videoChange callback.
  *
  * Public API:
- *   navigationManager.start(onVideoChange) → void
- *   navigationManager.stop()               → void
+ *   navigationManager.start(onVideoChange, onTick) → void
+ *   navigationManager.stop()                       → void
  */
 
 const navigationManager = (() => {
   let currentVideoId = null;
   let fallbackPollInterval = null;
   let onVideoChangeCallback = null;
+  let onTickCallback = null;
   let navigationHandler = null;
 
   /**
@@ -40,9 +41,15 @@ const navigationManager = (() => {
    * On cold load to a watch page, emits immediately.
    *
    * @param {(videoId: string) => void} onVideoChange
+   * @param {() => void} [onTick] - Invoked on every 1000ms poll tick,
+   *   regardless of whether a navigation occurred. This interval is the
+   *   only one alive for the life of the content script (D-059), so
+   *   progressTracker's 5s save cadence rides on it instead of owning a
+   *   second setInterval — see progressTracker.tick().
    */
-  function start(onVideoChange) {
+  function start(onVideoChange, onTick) {
     onVideoChangeCallback = onVideoChange;
+    onTickCallback = onTick || null;
 
     // Primary detection — yt-navigate-finish
     navigationHandler = () => {
@@ -60,6 +67,7 @@ const navigationManager = (() => {
         // Only emit via fallback if yt-navigate-finish hasn't already handled it
         checkAndEmit();
       }
+      if (onTickCallback) onTickCallback();
     }, 1000);
 
     // Cold load handling — if already on a watch page, emit immediately
@@ -82,6 +90,7 @@ const navigationManager = (() => {
 
     currentVideoId = null;
     onVideoChangeCallback = null;
+    onTickCallback = null;
   }
 
   return { start, stop };
