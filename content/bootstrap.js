@@ -22,11 +22,23 @@
       return; // Exit silently — tracking only applies to watch pages
     }
 
+    // Settings are read once per navigation, here, and passed down — never
+    // re-read inside progressTracker's 5-second interval (Roadmap 7.3). A
+    // settings read failure (corrupt/missing/unreadable) must never block
+    // resume (7.7) — fall back to defaults silently, warn only.
+    let settings;
+    try {
+      settings = await storageManager.getSettings();
+    } catch (err) {
+      console.warn('[YTResume] Settings read failed, using defaults:', err.message);
+      settings = storageManager.getDefaultSettings();
+    }
+
     try {
       // 3. Wait for reliable player state
       const video = await playerObserver.waitForVideo();
 
-      // Guards for unsupported formats (safety nets, though isWatchPage 
+      // Guards for unsupported formats (safety nets, though isWatchPage
       // usually covers this, YouTube sometimes plays Shorts in standard player)
       if (youtubeUtils.isShorts() || youtubeUtils.isLive(video)) {
         return;
@@ -36,7 +48,7 @@
       try {
         const saved = await storageManager.getProgress(videoId);
         if (saved) {
-          await resumeManager.tryResume(video, saved, videoId);
+          await resumeManager.tryResume(video, saved, videoId, settings);
         }
       } catch(err) {
         // Log but do not crash — resume failure shouldn't kill tracking
@@ -45,7 +57,7 @@
 
       // 5. Start Progress Tracking
       // This is called whether resume succeeded, failed, or didn't occur
-      progressTracker.start(video, videoId);
+      progressTracker.start(video, videoId, settings);
 
     } catch(err) {
       console.warn('[YTResume] Player initialization failed:', err.message);

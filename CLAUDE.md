@@ -131,17 +131,9 @@ stale for anything Phase 2+ changed. Icons are `icon-16.png`, hyphenated.
 
 ## Project layout
 
-```
-manifest.json
-content/    bootstrap · navigationManager · playerObserver · resumeManager · progressTracker · uiInjector
-storage/    storageManager.js          # sole owner of chrome.storage.local
-utils/      youtubeUtils · timeUtils   # pure functions only — no DOM, no storage, no side effects
-popup/      popup.html · popup.js · popup.css   # two views: saved videos, settings
-docs/       ROADMAP_v2 · DECISIONS · PRD · TDD · UX_Spec · Dev_Checklist · project-state-summary
-```
-
-`bootstrap.js` orchestrates and owns no logic. Modules communicate by explicit calls and callbacks,
-never sideways. Load order in `manifest.json` is significant: storage → utils → content.
+`utils/` is pure functions only — no DOM, no storage, no side effects. `bootstrap.js` orchestrates
+and owns no logic. Modules communicate by explicit calls and callbacks, never sideways. Load order
+in `manifest.json` is significant: storage → utils → content.
 
 ## Conventions
 

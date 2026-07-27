@@ -5,8 +5,8 @@
  * to storage on defined triggers.
  *
  * Public API:
- *   progressTracker.start(video, videoId) → void
- *   progressTracker.stop()                → void
+ *   progressTracker.start(video, videoId, settings) → void
+ *   progressTracker.stop()                          → void
  */
 
 const progressTracker = (() => {
@@ -14,6 +14,7 @@ const progressTracker = (() => {
   let lastSavedTime = 0;
   let activeVideo = null;
   let activeVideoId = null;
+  let minWatchSeconds = 30; // read once per navigation in start() (Roadmap 7.3)
 
   // Bound handler references for proper removal
   let handlePause = null;
@@ -51,6 +52,11 @@ const progressTracker = (() => {
       return; // invalid position guard
     }
 
+    if (!timeUtils.meetsMinimumWatched(current, minWatchSeconds)) {
+      debugLogger.log('attemptSave:skipped', { trigger, reason: 'belowMinWatch', current, minWatchSeconds });
+      return; // Roadmap 7.5 — no storage entry for a video watched less than this
+    }
+
     const deltaBlocked = !bypassDelta && Math.abs(current - lastSavedTime) < 5;
     debugLogger.log('attemptSave', {
       trigger,
@@ -70,13 +76,17 @@ const progressTracker = (() => {
   /**
    * Initializes interval-based and event-based progress tracking
    * for the given video element and videoId.
+   *
+   * @param {Settings} settings - read once per navigation by bootstrap.js
+   *   (Roadmap 7.3); never re-read inside the interval below.
    */
-  function start(video, videoId) {
+  function start(video, videoId, settings = {}) {
     // Safety: stop any existing tracking first
     stop();
 
     activeVideo = video;
     activeVideoId = videoId;
+    minWatchSeconds = settings.minWatchSeconds ?? 30;
     lastSavedTime = Math.floor(video.currentTime);
 
     // Core interval — every 5 seconds
@@ -128,6 +138,7 @@ const progressTracker = (() => {
     activeVideo = null;
     activeVideoId = null;
     lastSavedTime = 0;
+    minWatchSeconds = 30;
   }
 
   return { start, stop };

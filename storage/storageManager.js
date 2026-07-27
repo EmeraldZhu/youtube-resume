@@ -14,6 +14,7 @@
  *   storageManager.getSettings()           → Promise<Settings>
  *   storageManager.saveSettings(partial)   → Promise<Settings>
  *   storageManager.resetSettings()         → Promise<Settings>
+ *   storageManager.getDefaultSettings()    → Settings (sync, no storage access)
  *
  * Types:
  *   VideoProgress = { time: number, duration: number, updated: number, title?: string }
@@ -203,6 +204,16 @@ const storageManager = (() => {
     return defaults;
   }
 
+  /**
+   * Synchronous copy of DEFAULT_SETTINGS, no storage access. Used by callers
+   * (bootstrap.js, D-049) that need a fallback when getSettings() itself
+   * rejects — e.g. chrome.storage unavailable — so a settings failure can
+   * never block resume (Roadmap 7.7).
+   */
+  function getDefaultSettings() {
+    return { ...DEFAULT_SETTINGS };
+  }
+
   migrate();
 
   return {
@@ -214,6 +225,7 @@ const storageManager = (() => {
     getSettings,
     saveSettings,
     resetSettings,
+    getDefaultSettings,
   };
 })();
 

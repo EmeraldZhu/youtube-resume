@@ -16,7 +16,7 @@
 | 4 | Storage Schema v2, Title Capture & Migration | DONE | — |
 | 5 | In-Player UI Re-Calibration | AWAITING VERIFICATION | — |
 | 6 | Settings Store & Settings Panel | DONE | — |
-| 7 | Wire Settings Into Runtime | NOT STARTED | — |
+| 7 | Wire Settings Into Runtime | DONE | — |
 | 8 | Saved Videos Panel | NOT STARTED | — |
 | 9 | Integration, Regression & Store Resubmission | NOT STARTED | D-032, D-033 |
 
@@ -43,19 +43,21 @@ v1.0 popup, bootstrap orchestration.
   `ended` handler added (H6 fixed), `pagehide` replaces `beforeunload` (D-025), invalid-position
   guard incl. NaN-duration hole (D-042/D-043).
 - Restart button/toast visuals re-calibrated against measured live DOM (Phase 5, awaiting
-  verification): toast offset now derived at runtime from control-bar height (D-028), button
-  gets a measured pill fill (D-027/D-046 — no native text-pill exists to copy directly).
-- Settings panel built and owner-verified (Phase 6): second popup view, gear/back navigation,
-  six controls (segmented + toggle) under `youtubeResumeSettings`, Clear saved progress and Reset
-  to defaults both moved in with inline confirmation, `youtubeResume`/`youtubeResumeSettings`
-  independence confirmed (T6.7/T6.9). No saved-videos panel yet (schema/storage side done in
-  Phase 4, owner-verified incl. against a real v1.0 profile; Phase 8 builds that UI). Settings
-  persist but don't affect runtime yet — that's Phase 7.
+  verification): toast offset derived at runtime from control-bar height (D-028), button gets a
+  measured pill fill (D-027/D-046).
+- Settings panel built and owner-verified (Phase 6): second popup view, six controls under
+  `youtubeResumeSettings`, Clear/Reset with inline confirmation, key independence confirmed
+  (T6.7/T6.9). Saved-videos panel UI still pending (Phase 8; storage side done Phase 4).
+- Settings wired into runtime, owner-verified (Phase 7): thresholds are now arguments (D-049);
+  `bootstrap.js` reads settings once per navigation, never re-reads inside the interval; toast/
+  button gated on their toggles; saves below `minWatchSeconds` skipped (D-050); settings-read
+  failure falls back to defaults silently. T7.1–T7.11 run live against real YouTube playback via
+  `chrome-devtools-mcp` (D-051/D-052), not just code review — see phase report for the run log.
 
 ## Next action
 
-Phase 5 awaiting owner verification (T5.1–T5.12, see phase report). Phase 6 DONE. Phase 7
-(wire settings into runtime) is next up.
+Phase 5 awaiting owner verification (T5.1–T5.12, see phase report). Phases 6–7 DONE. Phase 8
+(saved videos panel) is next up.
 D-034 (ship reliability as a v1.1 patch?) remains OPEN, owned by Human.
 
 ## Doc versions

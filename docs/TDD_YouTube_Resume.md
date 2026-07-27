@@ -9,7 +9,7 @@
 | **Document Type** | Technical Design Document (TDD) |
 | **Version** | 1.0.0 |
 | **Status** | Draft — Ready for Implementation |
-| **Last Updated** | 2026-03-09 |
+| **Last Updated** | 2026-07-27 |
 | **Companion Document** | PRD_YouTube_Resume.md v1.0.0 |
 
 ---
@@ -234,39 +234,58 @@ None. This module is self-executing on load.
 
 #### Behavior
 
+**Phase 7 (Roadmap 7.3, D-049):** settings are read exactly once per navigation, here, before the
+resume attempt, and passed down to both `resumeManager.tryResume()` and `progressTracker.start()`.
+Neither module re-reads settings itself; `progressTracker`'s 5-second interval reuses the value
+captured at `start()`. A settings read failure falls back to `storageManager.getDefaultSettings()`
+(a synchronous copy of the defaults, no storage access) and continues — it must never block resume
+(Roadmap 7.7).
+
 ```javascript
 // Pseudo-implementation
-function init() {
-  navigationManager.start((videoId) => {
-    // videoId may be null (Phase 2, D-036) — e.g. leaving a watch page.
-    // Teardown previous session runs regardless; isWatchPage() below exits early in that case.
-    progressTracker.stop();
-    uiInjector.cleanup();
-    playerObserver.disconnect();
+async function onVideoChange(videoId) {
+  progressTracker.stop();
+  uiInjector.cleanup();
+  playerObserver.disconnect();
 
-    if (!youtubeUtils.isWatchPage()) return;
+  if (!youtubeUtils.isWatchPage()) return;
 
-    playerObserver.waitForVideo()
-      .then(async (videoElement) => {
-        const saved = await storageManager.getProgress(videoId);
+  let settings;
+  try {
+    settings = await storageManager.getSettings();
+  } catch (err) {
+    console.warn('[YTResume] Settings read failed, using defaults:', err.message);
+    settings = storageManager.getDefaultSettings();
+  }
 
-        if (saved) {
-          await resumeManager.tryResume(videoElement, saved, videoId);
-        }
+  try {
+    const videoElement = await playerObserver.waitForVideo();
 
-        progressTracker.start(videoElement, videoId);
-      })
-      .catch((err) => {
-        console.warn('[YTResume] Player not detected:', err.message);
-      });
-  });
+    if (youtubeUtils.isShorts() || youtubeUtils.isLive(videoElement)) return;
+
+    try {
+      const saved = await storageManager.getProgress(videoId);
+      if (saved) {
+        await resumeManager.tryResume(videoElement, saved, videoId, settings);
+      }
+    } catch (err) {
+      console.warn('[YTResume] Resume pipeline failed:', err.message);
+    }
+
+    progressTracker.start(videoElement, videoId, settings);
+  } catch (err) {
+    console.warn('[YTResume] Player initialization failed:', err.message);
+  }
 }
 
-init();
+navigationManager.start(onVideoChange);
 ```
 
 #### Error Behavior
 - If `playerObserver.waitForVideo()` rejects (timeout), log warning and skip resume + tracking for this navigation
+- If `storageManager.getSettings()` rejects for any reason (corrupt/missing/unreadable key), fall
+  back to `storageManager.getDefaultSettings()` and continue — never block resume (Roadmap 7.7,
+  D-049)
 - Must not throw uncaught exceptions — all promise chains must have `.catch()`
 
 ---
@@ -420,7 +439,9 @@ Disconnects the `MutationObserver` and cancels the timeout. Safe to call even if
 resumeManager.tryResume(
   video: HTMLVideoElement,
   saved: VideoProgress,
-  videoId: string
+  videoId: string,
+  settings: Settings   // Phase 7 — read once per navigation by bootstrap.js; defaults
+                        // below only guard direct/test callers that omit it
 ): Promise<void>
 ```
 
@@ -439,15 +460,23 @@ const SEEK_MAX_ATTEMPTS = 3;        // D-022
 
 #### Detailed Logic
 
-Rewritten Phase 2 (D-019 through D-022, D-038); Phase 3 added the minimum-watched short-circuit below.
+Rewritten Phase 2 (D-019 through D-022, D-038); Phase 3 added the minimum-watched short-circuit
+below; Phase 7 threaded `settings` through the threshold calls and gated the UI calls at the end
+(Roadmap 7.1, 7.4, D-049).
 
 ```javascript
-async function tryResume(video, saved, videoId) {
+async function tryResume(video, saved, videoId, settings = {}) {
+  const minWatchSeconds = settings.minWatchSeconds ?? 30;
+  const completionThreshold = settings.completionThreshold ?? 0.95;
+  const rewindSeconds = settings.rewindSeconds ?? 2;
+  const showToast = settings.showToast ?? true;
+  const showRestartButton = settings.showRestartButton ?? true;
+
   // Duration-independent short-circuit: reject a saved time below the
   // minimum-watched threshold before paying for the metadata wait — no
   // duration value could make shouldResume() true anyway. Found via a live
   // "Metadata wait failed" report on a 19s video that could never resume.
-  if (!timeUtils.meetsMinimumWatched(saved.time)) {
+  if (!timeUtils.meetsMinimumWatched(saved.time, minWatchSeconds)) {
     return;
   }
 
@@ -461,7 +490,7 @@ async function tryResume(video, saved, videoId) {
     }
   }
 
-  if (!timeUtils.shouldResume(saved.time, video.duration)) {
+  if (!timeUtils.shouldResume(saved.time, video.duration, minWatchSeconds, completionThreshold)) {
     return; // Conditions not met — exit silently
   }
 
@@ -490,7 +519,7 @@ async function tryResume(video, saved, videoId) {
   const driftLimit = preDelayTime + RESUME_DELAY_MS / 1000 + DRIFT_TOLERANCE_S;
   if (video.currentTime > driftLimit) return;
 
-  const resumeTime = timeUtils.getResumeTime(saved.time);
+  const resumeTime = timeUtils.getResumeTime(saved.time, rewindSeconds);
 
   // D-022: verified seek, bounded retry
   const ok = await seekWithVerification(video, resumeTime);
@@ -502,8 +531,10 @@ async function tryResume(video, saved, videoId) {
     return;
   }
 
-  uiInjector.showRestartButton(video, videoId);
-  uiInjector.showToast(resumeTime);
+  // Phase 7 (Roadmap 7.4): the seek itself is unconditional — only the UI is
+  // settings-gated. Both off means the resume still happens, silently.
+  if (showRestartButton) uiInjector.showRestartButton(video, videoId);
+  if (showToast) uiInjector.showToast(resumeTime);
 }
 ```
 
@@ -541,7 +572,7 @@ async function tryResume(video, saved, videoId) {
 #### Public API
 
 ```typescript
-progressTracker.start(video: HTMLVideoElement, videoId: string): void
+progressTracker.start(video: HTMLVideoElement, videoId: string, settings: Settings): void
 progressTracker.stop(): void
 ```
 
@@ -552,16 +583,20 @@ let intervalId: number | null = null;
 let lastSavedTime: number = 0;
 let activeVideo: HTMLVideoElement | null = null;
 let activeVideoId: string | null = null;
+let minWatchSeconds: number = 30;   // Phase 7 — captured once in start(), never re-read
 ```
 
 #### Detailed Logic
 
-**`start(video, videoId)`:**
+**`start(video, videoId, settings)`:** Phase 7 (Roadmap 7.3) — `settings.minWatchSeconds` is
+captured into module state here, once per navigation, and reused by every `attemptSave()` call
+including the 5-second interval. It is never re-read from storage inside the interval.
 
 ```javascript
-function start(video, videoId) {
+function start(video, videoId, settings = {}) {
   activeVideo = video;
   activeVideoId = videoId;
+  minWatchSeconds = settings.minWatchSeconds ?? 30;
   lastSavedTime = video.currentTime;
 
   // Core interval — the only trigger the delta guard applies to (D-024)
@@ -589,6 +624,10 @@ function attemptSave(bypassDelta, trigger) {
   const duration = Math.floor(activeVideo.duration);
 
   if (Number.isNaN(current) || current < 0 || Number.isNaN(duration) || current > duration) return; // invalid position guard
+
+  // Phase 7 (Roadmap 7.5): no storage entry for a video watched less than
+  // minWatchSeconds — same position-based check resumeManager uses.
+  if (!timeUtils.meetsMinimumWatched(current, minWatchSeconds)) return;
 
   if (!bypassDelta && Math.abs(current - lastSavedTime) < 5) return; // delta guard — interval only
 
@@ -656,6 +695,7 @@ storageManager.clearAllProgress(): Promise<void>
 storageManager.getSettings(): Promise<Settings>              // v2 — Phase 6
 storageManager.saveSettings(partial: Partial<Settings>): Promise<Settings>  // v2 — Phase 6
 storageManager.resetSettings(): Promise<Settings>             // v2 — Phase 6
+storageManager.getDefaultSettings(): Settings                 // v2 — Phase 7, sync, no storage access
 ```
 
 #### Types
@@ -822,6 +862,13 @@ async function resetSettings() {
   await chrome.storage.local.set({ [SETTINGS_KEY]: defaults });
   return defaults;
 }
+
+// Phase 7, D-049 — synchronous, no storage access. bootstrap.js falls back
+// to this when getSettings() itself rejects (chrome.storage unavailable),
+// so a settings failure can never block resume (Roadmap 7.7).
+function getDefaultSettings() {
+  return { ...DEFAULT_SETTINGS };
+}
 ```
 
 `getSettings()` always merges stored values over `DEFAULT_SETTINGS`, so a missing key (first run) or
@@ -829,6 +876,9 @@ a corrupted value (e.g. `youtubeResumeSettings` manually overwritten with a stri
 an undefined setting — the merge falls back to `{}` when the stored value isn't a plain object.
 `saveSettings(partial)` reads-merges-writes, so callers only pass the keys that changed.
 `resetSettings()` writes `DEFAULT_SETTINGS` verbatim and never touches `youtubeResume` (D-014).
+`getDefaultSettings()` covers the remaining failure mode `getSettings()` can't self-heal: the
+`chrome.storage.local.get()` call itself rejecting (not just returning a corrupt value) — see
+§4.1's bootstrap fallback.
 
 ---
 
@@ -1041,15 +1091,20 @@ function isLive(video) {
 #### Public API
 
 ```typescript
-timeUtils.shouldResume(savedTime: number, duration: number): boolean
-timeUtils.meetsMinimumWatched(savedTime: number): boolean
-timeUtils.getResumeTime(savedTime: number): number
+timeUtils.shouldResume(savedTime: number, duration: number, minWatchSeconds?: number, completionThreshold?: number): boolean
+timeUtils.meetsMinimumWatched(savedTime: number, minWatchSeconds?: number): boolean
+timeUtils.getResumeTime(savedTime: number, rewindSeconds?: number): number
 ```
+
+**Phase 7 (Roadmap 7.1, 7.2, D-049):** every threshold is now a caller-supplied argument, not a
+fixed module constant. The constants below became *defaults only*, used when a caller omits the
+argument (direct/test callers; production callers always pass the settings-derived value read once
+per navigation by `bootstrap.js` — see §4.1, §4.4, §4.5).
 
 #### Implementations
 
 ```javascript
-// Constants
+// Defaults only — production values come from Settings (storageManager.js §4.6)
 const MIN_RESUME_SECONDS   = 30;
 const COMPLETION_THRESHOLD = 0.95;
 const ROLLBACK_SECONDS     = 2;
@@ -1057,18 +1112,18 @@ const ROLLBACK_SECONDS     = 2;
 // Exposed separately (Phase 3) so resumeManager can reject a saved time
 // below the minimum before paying for the metadata wait (D-038) — no
 // duration value could make shouldResume() true in that case anyway.
-function meetsMinimumWatched(savedTime) {
-  return savedTime > MIN_RESUME_SECONDS;
+function meetsMinimumWatched(savedTime, minWatchSeconds = MIN_RESUME_SECONDS) {
+  return savedTime > minWatchSeconds;
 }
 
-function shouldResume(savedTime, duration) {
+function shouldResume(savedTime, duration, minWatchSeconds = MIN_RESUME_SECONDS, completionThreshold = COMPLETION_THRESHOLD) {
   if (!duration || isNaN(duration) || duration === Infinity) return false;
-  return meetsMinimumWatched(savedTime) &&
-         savedTime < duration * COMPLETION_THRESHOLD;
+  return meetsMinimumWatched(savedTime, minWatchSeconds) &&
+         savedTime < duration * completionThreshold;
 }
 
-function getResumeTime(savedTime) {
-  return Math.max(0, savedTime - ROLLBACK_SECONDS);
+function getResumeTime(savedTime, rewindSeconds = ROLLBACK_SECONDS) {
+  return Math.max(0, savedTime - rewindSeconds);
 }
 ```
 
@@ -1136,6 +1191,7 @@ There is no global state object. Each module manages its own internal state priv
 | Active `MutationObserver` | `playerObserver` | On `waitForVideo()` call | On `disconnect()` |
 | `intervalId` | `progressTracker` | On `start()` | On `stop()` |
 | `lastSavedTime` | `progressTracker` | On `start()` | On `stop()` |
+| `minWatchSeconds` *(v2 — Phase 7)* | `progressTracker` | On `start()`, from `settings` param | On `stop()`, back to the 30s default |
 | `buttonElement` | `uiInjector` | On `showRestartButton()` | On `cleanup()` or click |
 | `dismissTimer` | `uiInjector` | On `showRestartButton()` | On `cleanup()` or click |
 
@@ -1148,6 +1204,13 @@ Persistent state lives in `chrome.storage.local` under three root keys (v2, PRD 
 (D-013). No module other than `storageManager.js` may read from or write to `chrome.storage.local`
 directly — this now also covers the popup, which loads `storage/storageManager.js` as of Phase 4
 instead of calling `chrome.storage.local` itself.
+
+**Settings propagation (v2 — Phase 7, Roadmap 7.3, 7.6):** `bootstrap.js` reads `Settings` from
+`storageManager.getSettings()` exactly once per navigation and passes the object to
+`resumeManager.tryResume()` and `progressTracker.start()` as a parameter — neither module reads
+storage itself. This means a setting changed in the popup while a YouTube tab is already open takes
+effect on that tab's *next* navigation, not live; there is no mechanism (message passing, storage
+listener) for pushing a change into an already-running session, by design.
 
 ---
 
@@ -1187,6 +1250,7 @@ instead of calling `chrome.storage.local` itself.
 | Leaving a watch page for a non-watch page | `navigationManager` | Emits `null`; bootstrap tears down tracking/UI/observer (D-036) |
 | Returning to the same video after leaving | `navigationManager` | Re-emits (currentVideoId was reset to `null` on leaving); bootstrap re-initializes (D-036) |
 | Rapid successive navigations | `bootstrap` | Each navigation calls teardown before init; last navigation wins |
+| `storageManager.getSettings()` rejects (corrupt/missing/unreadable `youtubeResumeSettings`, or `chrome.storage` unavailable) | `bootstrap` | Fall back to `storageManager.getDefaultSettings()`; warn only; resume and tracking proceed with defaults (Roadmap 7.7, D-049, T7.10) |
 
 ---
 

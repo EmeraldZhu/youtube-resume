@@ -5,7 +5,7 @@
  * and execute the seek. Coordinates with uiInjector.
  *
  * Public API:
- *   resumeManager.tryResume(video, saved, videoId) → Promise<void>
+ *   resumeManager.tryResume(video, saved, videoId, settings) → Promise<void>
  */
 
 const resumeManager = (() => {
@@ -106,8 +106,16 @@ const resumeManager = (() => {
    * @param {HTMLVideoElement} video
    * @param {VideoProgress} saved - { time, duration, updated }
    * @param {string} videoId
+   * @param {Settings} settings - read once per navigation by bootstrap.js
+   *   (Roadmap 7.3); defaults here only guard direct/test callers that omit it.
    */
-  async function tryResume(video, saved, videoId) {
+  async function tryResume(video, saved, videoId, settings = {}) {
+    const minWatchSeconds = settings.minWatchSeconds ?? 30;
+    const completionThreshold = settings.completionThreshold ?? 0.95;
+    const rewindSeconds = settings.rewindSeconds ?? 2;
+    const showToast = settings.showToast ?? true;
+    const showRestartButton = settings.showRestartButton ?? true;
+
     debugLogger.log('tryResume:entry', {
       videoId,
       savedTime: saved.time,
@@ -117,7 +125,7 @@ const resumeManager = (() => {
     // Duration-independent short-circuit: below the minimum watched threshold,
     // no duration value could make shouldResume() true, so don't pay for the
     // metadata wait (D-038) just to fail the bounds check anyway.
-    if (!timeUtils.meetsMinimumWatched(saved.time)) {
+    if (!timeUtils.meetsMinimumWatched(saved.time, minWatchSeconds)) {
       debugLogger.log('tryResume:belowMinimum', { savedTime: saved.time });
       return;
     }
@@ -146,7 +154,7 @@ const resumeManager = (() => {
     });
 
     // Validate resume conditions
-    const shouldResumeResult = timeUtils.shouldResume(saved.time, video.duration);
+    const shouldResumeResult = timeUtils.shouldResume(saved.time, video.duration, minWatchSeconds, completionThreshold);
     debugLogger.log('tryResume:shouldResume', {
       result: shouldResumeResult,
       savedTime: saved.time,
@@ -213,7 +221,7 @@ const resumeManager = (() => {
     });
     if (guardAborted) return;
 
-    const resumeTime = timeUtils.getResumeTime(saved.time);
+    const resumeTime = timeUtils.getResumeTime(saved.time, rewindSeconds);
     debugLogger.log('tryResume:resumeTime', { resumeTime });
 
     const seekOk = await seekWithVerification(video, resumeTime);
@@ -237,8 +245,10 @@ const resumeManager = (() => {
       return;
     }
 
-    uiInjector.showRestartButton(video, videoId);
-    uiInjector.showToast(resumeTime);
+    // T7.7/T7.8/T7.9: the seek itself is unconditional — only the UI is
+    // settings-gated. Off means zero injected DOM, not "resume disabled".
+    if (showRestartButton) uiInjector.showRestartButton(video, videoId);
+    if (showToast) uiInjector.showToast(resumeTime);
   }
 
   return { tryResume };
