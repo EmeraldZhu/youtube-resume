@@ -30,6 +30,7 @@
    - 4.8 [youtubeUtils.js](#48-youtubeutilsjs)
    - 4.9 [timeUtils.js](#49-timeutilsjs)
    - 4.10 [popup/popup.js — Settings Panel](#410-popuppopupjs--settings-panel-v2--phase-6)
+   - 4.11 [popup/popup.js — Saved Videos List](#411-popuppopupjs--saved-videos-list-v2--phase-8)
 5. [Inter-Module Contracts](#5-inter-module-contracts)
 6. [State Management](#6-state-management)
 7. [Error Handling Strategy](#7-error-handling-strategy)
@@ -101,6 +102,11 @@ youtube-resume/
 ├── utils/
 │   ├── youtubeUtils.js         # URL parsing, videoId extraction
 │   └── timeUtils.js            # Threshold math, resume calculations
+│
+├── popup/                      # v2 — Phase 6 (settings) / Phase 8 (saved videos list)
+│   ├── popup.html              # Two views: #view-list (default), #view-settings
+│   ├── popup.js                # List rendering + settings wiring; no storage logic of its own
+│   └── popup.css               # 360px fixed width, 560px max height (UX Spec §6.2)
 │
 └── assets/
     └── icons/
@@ -1158,6 +1164,38 @@ no modal. `Clear saved progress` calls `storageManager.clearAllProgress()` (remo
 only); `Reset to defaults` calls `storageManager.resetSettings()` (removes/overwrites
 `youtubeResumeSettings` only). Each path is wired to a disjoint storage key, which is what makes T6.7
 and T6.9 (cross-key isolation) structurally guaranteed rather than merely tested.
+
+---
+
+### 4.11 `popup/popup.js` — Saved Videos List (v2 — Phase 8)
+
+**Purpose:** Renders `#view-list`, the popup's default view — a scrollable list of every
+`youtubeResume` entry, sorted by `updated` descending. Reads through `storageManager.getAllProgress()`
+and `getSettings()` (§4.6); owns no storage logic of its own.
+
+**Row construction:** every row is built with `document.createElement` — no `innerHTML` anywhere
+(hard constraint, T8.13). Each `<li class="video-row">` contains an `<a class="row-link">` (thumbnail
++ title + progress bar + meta line, whole-row click target) and a sibling `<button class="remove-btn">`
+— siblings, not nested, so both are independently reachable by Tab (T8.12) and the remove click can
+`preventDefault()` without fighting the anchor's own navigation.
+
+**Thumbnails (D-004/D-005):** the `<img>` element itself is only created when `settings.loadThumbnails`
+is true. When it's false, no `<img>` exists in the row at all — not a hidden one, not one with an
+unset `src` — because `loading="lazy"` alone does not prevent a request once `src` is set (T8.8).
+On load error, the handler removes the `<img>` and adds `.placeholder` to `.thumb-wrap`, whose
+background colour is the only visual left (T8.7) — no broken-image icon, no console error from
+application code (the browser's own "failed to load resource" network log for a 404 image is
+unrelated to and unsuppressible by application code).
+
+**Remove control:** `deleteProgress(videoId)` (§4.6) then a direct DOM removal of that `<li>` and a
+count decrement — no full re-render, no re-read from storage (T8.9).
+
+**Empty state:** `#empty-state` and `#video-list` are toggled via the same `.hidden` class used for
+view switching; `updateCount(0)` is the single place that decides which is shown.
+
+**Render budget (T8.2):** 200 entries render in ~25ms measured via `chrome-devtools-mcp` (D-051/D-052)
+— comfortably under the 200ms budget (Roadmap 8.10) — because the list is built once from an
+already-fetched object and appended in a single pass, with thumbnails loading progressively after.
 
 ---
 

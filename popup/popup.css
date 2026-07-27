@@ -8,14 +8,19 @@
   --success-color: #0b8043;
   --danger-color: #d93025;
   --hover-bg: #f5f5f5;
-  
+  --progress-fill: #cc0000;
+  --thumb-placeholder: #f0f0f0;
+
   --font-stack: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
 }
 
-body {
+html, body {
   margin: 0;
   padding: 0;
-  width: 280px;
+}
+
+body {
+  width: 360px;
   background-color: var(--bg-color);
   color: var(--text-primary);
   font-family: var(--font-stack);
@@ -27,6 +32,7 @@ body {
 .container {
   display: flex;
   flex-direction: column;
+  max-height: 560px;
 }
 
 .view {
@@ -73,22 +79,31 @@ h1, h2, p {
   margin-bottom: 2px;
 }
 
-.subtitle {
-  font-size: 12px;
-  color: var(--text-muted);
-}
-
-.status-row, .stat-row, .support-row, .toggle-row {
+.support-row, .toggle-row {
   display: flex;
   justify-content: space-between;
   align-items: center;
 }
 
-/* Header row (view 1: title + gear) */
+/* Header row (view 1: title, count + gear) */
 .header-row {
   display: flex;
   justify-content: space-between;
-  align-items: flex-start;
+  align-items: center;
+}
+
+.header-right {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-shrink: 0;
+}
+
+.count {
+  font-variant-numeric: tabular-nums;
+  color: var(--text-muted);
+  font-size: 12px;
+  white-space: nowrap;
 }
 
 /* Settings header (view 2: back arrow + title) */
@@ -123,20 +138,6 @@ h1, h2, p {
   font-weight: 500;
 }
 
-.value {
-  color: var(--text-muted);
-}
-
-.success {
-  color: var(--success-color);
-}
-
-.stat-number {
-  font-variant-numeric: tabular-nums;
-  font-weight: 600;
-  color: var(--text-primary);
-}
-
 /* Buttons */
 button {
   font-family: var(--font-stack);
@@ -158,6 +159,12 @@ button {
 .btn-ghost:hover {
   background: var(--hover-bg);
   color: var(--text-primary);
+}
+
+.btn-ghost:disabled {
+  opacity: 0.5;
+  cursor: default;
+  pointer-events: none;
 }
 
 /* Confirmation Panel */
@@ -339,4 +346,132 @@ a {
 .promo-desc {
   color: var(--text-muted);
   font-size: 12px;
+}
+
+/* Saved videos list */
+.list-region {
+  max-height: 508px; /* 560px max popup height minus the fixed header (measured ~52px) */
+  overflow-y: auto;
+}
+
+.video-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.video-row {
+  position: relative;
+  border-top: 1px solid var(--divider-color);
+}
+
+.video-row:first-child {
+  border-top: none;
+}
+
+.row-link {
+  display: flex;
+  gap: 12px;
+  padding: 12px 16px;
+  color: inherit;
+}
+
+.row-link:hover,
+.row-link:focus-visible {
+  background: var(--hover-bg);
+}
+
+.thumb-wrap {
+  flex-shrink: 0;
+  width: 120px;
+  height: 68px;
+  border-radius: 4px;
+  overflow: hidden;
+  background: var(--thumb-placeholder);
+}
+
+.thumb {
+  width: 120px;
+  height: 68px;
+  object-fit: cover;
+  display: block;
+}
+
+.row-text {
+  min-width: 0;
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  gap: 6px;
+}
+
+.row-title {
+  font-size: 13px;
+  font-weight: 500;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+.progress-track {
+  height: 3px;
+  border-radius: 2px;
+  background: var(--divider-color);
+  overflow: hidden;
+}
+
+.progress-fill {
+  height: 100%;
+  background: var(--progress-fill);
+}
+
+.row-meta {
+  font-size: 12px;
+  color: var(--text-muted);
+}
+
+.remove-btn {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  width: 22px;
+  height: 22px;
+  padding: 0;
+  background: var(--bg-color);
+  border: 1px solid var(--divider-color);
+  border-radius: 4px;
+  color: var(--text-muted);
+  font-size: 12px;
+  line-height: 1;
+  opacity: 0;
+}
+
+.video-row:hover .remove-btn,
+.video-row:focus-within .remove-btn,
+.remove-btn:focus-visible {
+  opacity: 1;
+}
+
+.remove-btn:hover {
+  background: var(--hover-bg);
+  color: var(--text-primary);
+}
+
+/* Empty state */
+.empty-state {
+  padding: 48px 24px;
+  text-align: center;
+}
+
+.empty-title {
+  font-weight: 600;
+  margin-bottom: 8px;
+}
+
+.empty-body {
+  font-size: 12px;
+  color: var(--text-muted);
+  line-height: 1.4;
 }

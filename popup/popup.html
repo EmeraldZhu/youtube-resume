@@ -9,29 +9,26 @@
   <div class="container">
 
     <!-- View 1: Saved videos (default) -->
-    <div id="view-list" class="view">
+    <div id="view-list" class="view view-list">
       <header class="section header">
         <div class="header-row">
-          <div>
-            <h1 class="title">YouTube Resume</h1>
-            <p class="subtitle">Pick up right where you left off.</p>
+          <h1 class="title">YouTube Resume</h1>
+          <div class="header-right">
+            <span class="count" id="saved-count"></span>
+            <button id="settings-btn" class="icon-btn" type="button" aria-label="Settings">⚙</button>
           </div>
-          <button id="settings-btn" class="icon-btn" type="button" aria-label="Settings">⚙</button>
         </div>
       </header>
 
       <hr class="divider">
 
-      <div class="section status-row">
-        <span class="label">Status</span>
-        <span class="value success">✓ Active on YouTube</span>
-      </div>
+      <div class="list-region" id="list-region">
+        <ul class="video-list" id="video-list"></ul>
 
-      <hr class="divider">
-
-      <div class="section stat-row">
-        <span class="label">Saved videos</span>
-        <span class="value stat-number" id="saved-count">—</span>
+        <div class="empty-state hidden" id="empty-state">
+          <p class="empty-title">No saved videos yet</p>
+          <p class="empty-body">Videos you watch will appear here once your position is saved.</p>
+        </div>
       </div>
     </div>
 

@@ -22,15 +22,15 @@ that made it. A decision that exists only in a chat report is lost when the sess
 |----|----------|--------|-------|--------------|-------|
 | D-001 | Release is **v2.0.0**, not v5.0.0 | APPROVED | Human | All | v1.0.0 is the live Web Store version. |
 | D-002 | Settings page promoted into scope, reversing v1.0 non-goal NG4 | APPROVED | Human | Phase 6 | Deliberate promotion. NG4 removed from PRD §3.2. |
-| D-003 | Saved videos panel promoted from PRD §13 roadmap into v2.0 scope | APPROVED | Human | Phase 8 | Was "Resume history page", Medium priority. |
-| D-004 | Thumbnails permitted from `i.ytimg.com`, breaking the absolute zero-network claim | APPROVED | Human | Phase 8 | A list of opaque video IDs isn't usable. Requires D-020 before publishing. |
+| D-003 | Saved videos panel promoted from PRD §13 roadmap into v2.0 scope | DONE | Human | Phase 8 | Was "Resume history page", Medium priority. |
+| D-004 | Thumbnails permitted from `i.ytimg.com`, breaking the absolute zero-network claim | DONE | Human | Phase 8 | A list of opaque video IDs isn't usable. Requires D-020 before publishing. |
 | D-005 | Thumbnails have an off switch, default on, restoring fully-offline operation | APPROVED | Human | Phase 6 | Mitigates D-004. When off, `src` must not be set at all. |
-| D-006 | No new permissions: `<img>` for thumbnails, `<a target="_blank">` for opening videos | APPROVED | Human | Phase 8 | Avoids the `tabs` permission entirely. |
+| D-006 | No new permissions: `<img>` for thumbnails, `<a target="_blank">` for opening videos | DONE | Human | Phase 8 | Avoids the `tabs` permission entirely. |
 | D-007 | Six settings only; the 400ms delay, 5s interval and 200-entry cap stay hard-coded | APPROVED | Human | Phase 6 | Exposing the 400ms delay invites users to break their own resume. |
 | D-008 | Settings render as a second view **inside the popup** — not an options page, not a new tab | APPROVED | Human | Phase 6 | Owner explicitly rejected the new-tab pattern. |
 | D-009 | Settings use segmented buttons and toggles, never free numeric input | APPROVED | Human | Phase 6 | Eliminates validation and invalid states on a 360px surface. |
-| D-010 | Popup widens 280px → 360px; UX Spec §6.2 "must not feel like an app" formally relaxed | APPROVED | Human | Phase 8 | A thumbnail list is unusable at 280px. |
-| D-011 | Status row (`✓ Active on YouTube`, CP-12/CP-13) removed | APPROVED | Human | Phase 8 | A populated list is self-evident proof; empty state covers the zero-data case. |
+| D-010 | Popup widens 280px → 360px; UX Spec §6.2 "must not feel like an app" formally relaxed | DONE | Human | Phase 8 | A thumbnail list is unusable at 280px. |
+| D-011 | Status row (`✓ Active on YouTube`, CP-12/CP-13) removed | DONE | Human | Phase 8 | A populated list is self-evident proof; empty state covers the zero-data case. |
 
 ## Storage & data
 
@@ -93,6 +93,12 @@ that made it. A decision that exists only in a chat report is lost when the sess
 |----|----------|--------|-------|--------------|-------|
 | D-049 | `storageManager` gains a synchronous `getDefaultSettings()` (no storage access); `bootstrap.js` calls it only when `getSettings()` itself rejects, wrapping the call in try/catch | DONE | Claude | Phase 7 | Roadmap 7.7 requires a settings failure to never block resume. `getSettings()` already self-heals a corrupt *value* (merges over defaults), but a rejected promise (e.g. `chrome.storage` unavailable) needed a fallback that doesn't itself touch storage — duplicating the defaults object outside `storageManager` would drift, so it's exposed instead. Tier 2 value pick. |
 | D-050 | `progressTracker`'s `minWatchSeconds` gate reuses `timeUtils.meetsMinimumWatched(current, minWatchSeconds)` against the live playback position, mirroring `resumeManager`'s use of the same function against `saved.time` | DONE | Claude | Phase 7 | Roadmap 7.5 specifies the outcome ("no storage entry below this threshold") but not the mechanism. Reusing the existing position-based predicate avoids a second threshold concept; applies to every save trigger (interval and event), not just the interval, since none of them should persist an entry below the floor. Tier 2 value pick. |
+
+## Saved videos panel (Phase 8)
+
+| ID | Decision | Status | Owner | Implement In | Notes |
+|----|----------|--------|-------|--------------|-------|
+| D-053 | `.list-region` gets a static `max-height: 508px` (560px popup max minus the measured ~52px fixed header) with `overflow-y: auto`, instead of relying on flexbox `flex: 1` to derive the remaining height | DONE | Claude | Phase 8 | Roadmap 8.1 specifies the outcome (560px max, header fixed, list scrolls) but not the mechanism. A `flex:1; min-height:0` child inside a `max-height`-only, `height:auto` flex column does not get clamped — the flex container's own resolved height is computed from content *before* `max-height` is applied as a ceiling, so nothing forces the list to shrink; discovered live via `chrome-devtools-mcp` when a 200-row seed rendered as one long unclamped page instead of a 560px popup. A direct `max-height` on the scrolling element itself sidesteps the flex sizing question entirely and still shrinks-to-content for short lists (empty state, a handful of entries), matching "maximum height" rather than "fixed height". |
 
 ## Guardrails
 

@@ -17,7 +17,7 @@
 | 5 | In-Player UI Re-Calibration | AWAITING VERIFICATION | — |
 | 6 | Settings Store & Settings Panel | DONE | — |
 | 7 | Wire Settings Into Runtime | DONE | — |
-| 8 | Saved Videos Panel | NOT STARTED | — |
+| 8 | Saved Videos Panel | AWAITING VERIFICATION | — |
 | 9 | Integration, Regression & Store Resubmission | NOT STARTED | D-032, D-033 |
 
 **Status values:** NOT STARTED · IN PROGRESS · BLOCKED · AWAITING VERIFICATION · DONE
@@ -36,28 +36,27 @@ read/write/delete/eviction, progress tracking (interval + events), Restart butto
 v1.0 popup, bootstrap orchestration.
 
 **Known broken — remaining reasons for v2.0.0:**
-- Resume reliability (Phase 2) fixed, owner-verified: ad gating (D-019/D-020/D-040), drift guard
-  (D-021/D-037), verified seek gated to real UI (D-022/D-041), non-rejecting `waitForVideo()`
-  (D-023), teardown/re-entry fix (D-036), metadata retry (D-038).
-- Progress tracking (Phase 3) fixed, owner-verified: delta guard on interval only (D-024),
-  `ended` handler added (H6 fixed), `pagehide` replaces `beforeunload` (D-025), invalid-position
-  guard incl. NaN-duration hole (D-042/D-043).
+- Resume reliability (Phase 2) and progress tracking (Phase 3) fixed, owner-verified: ad gating,
+  drift guard, verified seek, `ended` handler, `pagehide` over `beforeunload`, invalid-position
+  guards (D-019 through D-025, D-036 through D-038, D-040 through D-043).
 - Restart button/toast visuals re-calibrated against measured live DOM (Phase 5, awaiting
-  verification): toast offset derived at runtime from control-bar height (D-028), button gets a
-  measured pill fill (D-027/D-046).
-- Settings panel built and owner-verified (Phase 6): second popup view, six controls under
-  `youtubeResumeSettings`, Clear/Reset with inline confirmation, key independence confirmed
-  (T6.7/T6.9). Saved-videos panel UI still pending (Phase 8; storage side done Phase 4).
-- Settings wired into runtime, owner-verified (Phase 7): thresholds are now arguments (D-049);
-  `bootstrap.js` reads settings once per navigation, never re-reads inside the interval; toast/
-  button gated on their toggles; saves below `minWatchSeconds` skipped (D-050); settings-read
-  failure falls back to defaults silently. T7.1–T7.11 run live against real YouTube playback via
-  `chrome-devtools-mcp` (D-051/D-052), not just code review — see phase report for the run log.
+  verification): runtime-derived toast offset and pill fill (D-027/D-028/D-046).
+- Settings panel built and owner-verified (Phase 6): second popup view, six controls, Clear/Reset
+  with key independence confirmed (T6.7/T6.9).
+- Settings wired into runtime, owner-verified (Phase 7): thresholds are arguments (D-049); saves
+  below `minWatchSeconds` skipped (D-050); settings-read failure falls back to defaults silently.
+  T7.1–T7.11 run live via `chrome-devtools-mcp` (D-051/D-052).
+- Saved videos panel built, awaiting verification (Phase 8): `#view-list` renders every entry via
+  `document.createElement` only (T8.13). Thumbnails gated on `loadThumbnails` — the `<img>` element
+  itself doesn't exist when off (T8.8 zero requests, verified live). Per-row remove deletes in
+  place (T8.9). List region clamps via static `max-height`, not flexbox `flex:1` (D-053 — the flex
+  approach silently failed to clamp). T8.1–T8.12, T8.14 run live via `chrome-devtools-mcp` against
+  seeded 200-entry storage; T8.4 confirmed on a real open YouTube tab.
 
 ## Next action
 
 Phase 5 awaiting owner verification (T5.1–T5.12, see phase report). Phases 6–7 DONE. Phase 8
-(saved videos panel) is next up.
+(saved videos panel) awaiting owner verification (T8.1–T8.14, see phase report). Phase 9 next up.
 D-034 (ship reliability as a v1.1 patch?) remains OPEN, owned by Human.
 
 ## Doc versions
