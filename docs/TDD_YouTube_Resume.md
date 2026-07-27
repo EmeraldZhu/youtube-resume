@@ -640,14 +640,18 @@ function stop() {
 
 ### 4.6 `storageManager.js`
 
-**Purpose:** Typed abstraction over `chrome.storage.local`. Owns all storage read/write/eviction logic.
+**Purpose:** Typed abstraction over `chrome.storage.local`. Owns all storage read/write/eviction/migration
+logic — the ONLY module that may touch `chrome.storage.local` (enforced for both the content script and
+the popup, which loads this module too as of Phase 4).
 
 #### Public API
 
 ```typescript
 storageManager.getProgress(videoId: string): Promise<VideoProgress | null>
-storageManager.saveProgress(videoId: string, time: number, duration: number): Promise<void>
+storageManager.getAllProgress(): Promise<Record<string, VideoProgress>>
+storageManager.saveProgress(videoId: string, time: number, duration: number, title?: string): Promise<void>
 storageManager.deleteProgress(videoId: string): Promise<void>
+storageManager.clearAllProgress(): Promise<void>
 ```
 
 #### Types
@@ -657,6 +661,16 @@ type VideoProgress = {
   time: number;       // Playback position, seconds (integer)
   duration: number;   // Total video duration, seconds (integer)
   updated: number;    // Unix timestamp in seconds
+  title?: string;     // v2 — optional, capped at 200 chars
+};
+
+type Settings = {
+  minWatchSeconds: number;       // default 30
+  completionThreshold: number;   // default 0.95
+  rewindSeconds: number;         // default 2
+  showToast: boolean;            // default true
+  showRestartButton: boolean;    // default true
+  loadThumbnails: boolean;       // default true
 };
 
 type StorageRoot = {
@@ -664,8 +678,16 @@ type StorageRoot = {
 };
 
 const STORAGE_KEY = 'youtubeResume';
+const SCHEMA_KEY = 'youtubeResumeSchema';        // v2 — root key, integer 2
+const SETTINGS_KEY = 'youtubeResumeSettings';    // v2 — root key
 const MAX_ENTRIES = 200;
+const MAX_TITLE_LENGTH = 200;                    // v2
+const CURRENT_SCHEMA_VERSION = 2;                // v2
 ```
+
+`youtubeResumeSchema` and `youtubeResumeSettings` are separate root keys, never nested inside
+`youtubeResume` — that object's keys are counted for the `MAX_ENTRIES` eviction cap, so a stray
+non-videoId key would corrupt both counting and eviction (D-013).
 
 #### Detailed Logic
 
@@ -679,18 +701,37 @@ async function getProgress(videoId) {
 }
 ```
 
-**`saveProgress(videoId, time, duration)`:**
+**`getAllProgress()`:**
 
 ```javascript
-async function saveProgress(videoId, time, duration) {
+async function getAllProgress() {
+  const result = await chrome.storage.local.get(STORAGE_KEY);
+  return result[STORAGE_KEY] ?? {};
+}
+```
+
+**`saveProgress(videoId, time, duration, title)`:**
+
+```javascript
+async function saveProgress(videoId, time, duration, title) {
   const result = await chrome.storage.local.get(STORAGE_KEY);
   const store = result[STORAGE_KEY] ?? {};
+  const existing = store[videoId];
 
-  store[videoId] = {
+  const entry = {
     time,
     duration,
     updated: Math.floor(Date.now() / 1000),
   };
+
+  // A missing/failed title capture preserves any previously stored
+  // title rather than erasing it (D-016).
+  const resolvedTitle = title ? title.slice(0, MAX_TITLE_LENGTH) : existing?.title;
+  if (resolvedTitle) {
+    entry.title = resolvedTitle;
+  }
+
+  store[videoId] = entry;
 
   // Eviction: trim to MAX_ENTRIES before writing
   const keys = Object.keys(store);
@@ -715,9 +756,44 @@ async function deleteProgress(videoId) {
 }
 ```
 
+**`clearAllProgress()`:** removes `youtubeResume` only, via `chrome.storage.local.remove(STORAGE_KEY)`.
+`youtubeResumeSettings` and `youtubeResumeSchema` are untouched (PRD §7.4).
+
+#### Migration (v1 → v2, PRD §7.6)
+
+Runs once, unconditionally, at module load (both content-script and popup contexts load this module,
+so whichever loads first performs it). Idempotent and purely additive — never rewrites, reorders, or
+deletes an existing `youtubeResume` entry:
+
+```javascript
+async function migrate() {
+  try {
+    const result = await chrome.storage.local.get([SCHEMA_KEY, SETTINGS_KEY]);
+    const toWrite = {};
+
+    if (result[SCHEMA_KEY] !== CURRENT_SCHEMA_VERSION) {
+      toWrite[SCHEMA_KEY] = CURRENT_SCHEMA_VERSION;
+    }
+    if (!result[SETTINGS_KEY]) {
+      toWrite[SETTINGS_KEY] = { ...DEFAULT_SETTINGS };
+    }
+
+    if (Object.keys(toWrite).length > 0) {
+      await chrome.storage.local.set(toWrite);
+    }
+  } catch (err) {
+    console.warn('[YTResume] Migration failed:', err.message);
+  }
+}
+```
+
+A migration failure logs a warning and the extension continues with in-memory defaults — it never
+blocks resume or tracking.
+
 #### Error Behavior
 - All methods are `async` and will reject if `chrome.storage.local` is unavailable
 - Callers must handle rejections — `storageManager` does not swallow errors internally
+- `migrate()` is the one exception: it catches and logs internally, since it runs unsupervised at load time
 - `getProgress` returns `null` for any missing key — never throws on absence
 
 ---
@@ -931,7 +1007,13 @@ There is no global state object. Each module manages its own internal state priv
 
 ### 6.2 Persistent State
 
-All persistent state lives in `chrome.storage.local` under the key `youtubeResume`. No module other than `storageManager.js` may read from or write to `chrome.storage.local` directly.
+Persistent state lives in `chrome.storage.local` under three root keys (v2, PRD §7.2): `youtubeResume`
+(videoId → `VideoProgress`, unchanged from v1), `youtubeResumeSettings` (user preferences), and
+`youtubeResumeSchema` (integer schema version, currently `2`). The latter two are siblings of
+`youtubeResume`, never nested inside it, since its keys are counted for the 200-entry eviction cap
+(D-013). No module other than `storageManager.js` may read from or write to `chrome.storage.local`
+directly — this now also covers the popup, which loads `storage/storageManager.js` as of Phase 4
+instead of calling `chrome.storage.local` itself.
 
 ---
 

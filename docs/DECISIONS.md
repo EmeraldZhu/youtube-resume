@@ -36,11 +36,13 @@ that made it. A decision that exists only in a chat report is lost when the sess
 
 | ID | Decision | Status | Owner | Implement In | Notes |
 |----|----------|--------|-------|--------------|-------|
-| D-012 | Schema advances to v2, adding optional `title` | APPROVED | Human | Phase 4 | Purely additive, so migration is non-destructive by construction. |
-| D-013 | Schema version lives in root key `youtubeResumeSchema`, never inside `youtubeResume` | APPROVED | Human | Phase 4 | `youtubeResume` keys are counted for eviction; a stray key corrupts it. |
-| D-014 | Settings live in root key `youtubeResumeSettings` | APPROVED | Human | Phase 4 | Clearing progress must not reset settings, and eviction must never eat one. |
-| D-015 | Title scraped from `document.title` with the ` - YouTube` suffix stripped, DOM selector as fallback | APPROVED | Claude | Phase 4 | `document.title` is far more stable across YouTube redesigns than metadata selectors. |
-| D-016 | Stored titles capped at 200 characters | APPROVED | Claude | Phase 4 | Tier 2 value pick. |
+| D-012 | Schema advances to v2, adding optional `title` | DONE | Human | Phase 4 | Purely additive, so migration is non-destructive by construction. |
+| D-013 | Schema version lives in root key `youtubeResumeSchema`, never inside `youtubeResume` | DONE | Human | Phase 4 | `youtubeResume` keys are counted for eviction; a stray key corrupts it. |
+| D-014 | Settings live in root key `youtubeResumeSettings` | DONE | Human | Phase 4 | Clearing progress must not reset settings, and eviction must never eat one. |
+| D-015 | Title scraped from `document.title` with the ` - YouTube` suffix stripped, DOM selector as fallback | DONE | Claude | Phase 4 | `document.title` is far more stable across YouTube redesigns than metadata selectors. |
+| D-016 | Stored titles capped at 200 characters | DONE | Claude | Phase 4 | Tier 2 value pick. |
+| D-044 | `popup.js` stopped calling `chrome.storage.local` directly (pre-existing v1.0 violation of the "storageManager is the sole owner" constraint); popup now loads `storage/storageManager.js` and uses new `getAllProgress()`/`clearAllProgress()` methods | DONE | Claude | Phase 4 | Found while doing T4.9 (grep for `chrome.storage`). CLAUDE.md hard constraint — route around, don't ask. `clearAllProgress()` removes only `youtubeResume`, leaving settings/schema untouched (PRD §7.4). |
+| D-045 | `saveProgress`'s new optional `title` param preserves an existing stored title when omitted/falsy, instead of erasing it | DONE | Claude | Phase 4 | Roadmap 4.5 says a missing title capture "must never block the save" but doesn't say whether it should clear a previously-good title; erasing on a transient capture failure (e.g. `document.title` momentarily blank during a redesign/SPA transition) would be a silent regression for panel display (Phase 8). Tier 2 value pick. |
 
 ## Reliability (Phases 1–3)
 

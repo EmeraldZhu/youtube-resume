@@ -217,14 +217,14 @@ These are suspected causes of unreliable resume, derived from reading the v1.0 T
 
 ### Tasks
 
-- [ ] 4.1 — **Define schema v2.** `VideoProgress` gains an optional `title: string`. All other fields unchanged.
-- [ ] 4.2 — **Add root key `youtubeResumeSchema`** holding the integer `2`. It must live at the top level of `chrome.storage.local`, **never inside `youtubeResume`**, because that object's keys are counted for eviction.
-- [ ] 4.3 — **Add root key `youtubeResumeSettings`** with the v2 defaults (see Phase 6).
-- [ ] 4.4 — **Write the migration.** On first run after update: if `youtubeResumeSchema` is absent, write `2`, write default settings if absent, and leave all existing `youtubeResume` entries untouched. Migration must be idempotent and must never delete or rewrite an existing entry.
-- [ ] 4.5 — **Capture the title.** On each save, read `document.title` and strip the trailing ` - YouTube`. If the result is empty, fall back to a DOM selector; if that also fails, omit the field. A missing title must never block the save.
-- [ ] 4.6 — Cap stored titles at 200 characters.
-- [ ] 4.7 — Confirm eviction still counts only genuine video entries and that the 200-entry cap is unaffected by the new root keys.
-- [ ] 4.8 — Confirm `storage/storageManager.js` remains the **only** module touching `chrome.storage.local`.
+- [x] 4.1 — **Define schema v2.** `VideoProgress` gains an optional `title: string`. All other fields unchanged.
+- [x] 4.2 — **Add root key `youtubeResumeSchema`** holding the integer `2`. It must live at the top level of `chrome.storage.local`, **never inside `youtubeResume`**, because that object's keys are counted for eviction.
+- [x] 4.3 — **Add root key `youtubeResumeSettings`** with the v2 defaults (see Phase 6).
+- [x] 4.4 — **Write the migration.** On first run after update: if `youtubeResumeSchema` is absent, write `2`, write default settings if absent, and leave all existing `youtubeResume` entries untouched. Migration must be idempotent and must never delete or rewrite an existing entry.
+- [x] 4.5 — **Capture the title.** On each save, read `document.title` and strip the trailing ` - YouTube`. If the result is empty, fall back to a DOM selector; if that also fails, omit the field. A missing title must never block the save.
+- [x] 4.6 — Cap stored titles at 200 characters.
+- [x] 4.7 — Confirm eviction still counts only genuine video entries and that the 200-entry cap is unaffected by the new root keys.
+- [x] 4.8 — Confirm `storage/storageManager.js` remains the **only** module touching `chrome.storage.local`. (Found and fixed a pre-existing v1.0 violation: `popup.js` called `chrome.storage.local` directly — see D-044.)
 
 ### Tests
 

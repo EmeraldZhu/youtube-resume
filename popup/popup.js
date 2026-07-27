@@ -1,8 +1,6 @@
 // popup.js - Data loading and UI interactions
 
 document.addEventListener('DOMContentLoaded', async () => {
-  const STORAGE_KEY = 'youtubeResume';
-  
   // DOM Elements
   const countEl = document.getElementById('saved-count');
   const confirmCountEl = document.getElementById('confirm-count');
@@ -15,8 +13,7 @@ document.addEventListener('DOMContentLoaded', async () => {
 
   // 1. Data Loading
   try {
-    const result = await chrome.storage.local.get(STORAGE_KEY);
-    const store = result[STORAGE_KEY] ?? {};
+    const store = await storageManager.getAllProgress();
     entryCount = Object.keys(store).length;
     countEl.textContent = entryCount;
   } catch (err) {
@@ -42,7 +39,7 @@ document.addEventListener('DOMContentLoaded', async () => {
   // 4. Interaction: Confirm Deletion
   confirmBtn.addEventListener('click', async () => {
     try {
-      await chrome.storage.local.remove(STORAGE_KEY);
+      await storageManager.clearAllProgress();
       entryCount = 0;
       countEl.textContent = '0';
       

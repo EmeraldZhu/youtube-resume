@@ -62,7 +62,8 @@ const progressTracker = (() => {
     if (deltaBlocked) return; // delta guard — interval trigger only (D-024)
 
     lastSavedTime = current;
-    storageManager.saveProgress(activeVideoId, current, duration)
+    const title = youtubeUtils.getTitle();
+    storageManager.saveProgress(activeVideoId, current, duration, title)
       .catch(err => console.warn('[YTResume] Save failed:', err.message));
   }
 
