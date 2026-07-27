@@ -13,7 +13,7 @@
 | 1 | Reliability Audit & Instrumentation | DONE | — |
 | 2 | Resume Engine Hardening | DONE | — |
 | 3 | Progress Tracking Hardening | DONE | — |
-| 4 | Storage Schema v2, Title Capture & Migration | AWAITING VERIFICATION | — |
+| 4 | Storage Schema v2, Title Capture & Migration | DONE | — |
 | 5 | In-Player UI Re-Calibration | NOT STARTED | — |
 | 6 | Settings Store & Settings Panel | NOT STARTED | — |
 | 7 | Wire Settings Into Runtime | NOT STARTED | — |
@@ -44,13 +44,13 @@ v1.0 popup, bootstrap orchestration.
   guard incl. NaN-duration hole (D-042/D-043).
 - Restart button/toast don't match YouTube's current UI: toast overlaps progress bar (D-028),
   button is bare text among pill controls (D-027).
-- No settings panel or saved-videos panel yet (schema/storage side done in Phase 4; Phases 6/8 build the UI).
+- No settings panel or saved-videos panel yet (schema/storage side done in Phase 4, owner-verified
+  incl. against a real v1.0 profile; Phases 6/8 build the UI).
 
 ## Next action
 
-Phase 4 code complete (D-012–D-016, D-044, D-045), **awaiting owner verification** — T4.1 needs a
-real v1.0 profile with real saved entries (S4); synthetic seeding isn't a substitute. See phase
-report for the full checklist. D-034 (ship reliability as a v1.1 patch?) remains OPEN, owned by Human.
+Phase 4 confirmed DONE by owner. Next is Phase 5 — In-Player UI Re-Calibration.
+D-034 (ship reliability as a v1.1 patch?) remains OPEN, owned by Human.
 
 ## Doc versions
 
