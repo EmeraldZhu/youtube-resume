@@ -15,7 +15,7 @@
 | 3 | Progress Tracking Hardening | DONE | — |
 | 4 | Storage Schema v2, Title Capture & Migration | DONE | — |
 | 5 | In-Player UI Re-Calibration | AWAITING VERIFICATION | — |
-| 6 | Settings Store & Settings Panel | NOT STARTED | — |
+| 6 | Settings Store & Settings Panel | DONE | — |
 | 7 | Wire Settings Into Runtime | NOT STARTED | — |
 | 8 | Saved Videos Panel | NOT STARTED | — |
 | 9 | Integration, Regression & Store Resubmission | NOT STARTED | D-032, D-033 |
@@ -45,12 +45,17 @@ v1.0 popup, bootstrap orchestration.
 - Restart button/toast visuals re-calibrated against measured live DOM (Phase 5, awaiting
   verification): toast offset now derived at runtime from control-bar height (D-028), button
   gets a measured pill fill (D-027/D-046 — no native text-pill exists to copy directly).
-- No settings panel or saved-videos panel yet (schema/storage side done in Phase 4, owner-verified
-  incl. against a real v1.0 profile; Phases 6/8 build the UI).
+- Settings panel built and owner-verified (Phase 6): second popup view, gear/back navigation,
+  six controls (segmented + toggle) under `youtubeResumeSettings`, Clear saved progress and Reset
+  to defaults both moved in with inline confirmation, `youtubeResume`/`youtubeResumeSettings`
+  independence confirmed (T6.7/T6.9). No saved-videos panel yet (schema/storage side done in
+  Phase 4, owner-verified incl. against a real v1.0 profile; Phase 8 builds that UI). Settings
+  persist but don't affect runtime yet — that's Phase 7.
 
 ## Next action
 
-Phase 5 code complete, awaiting owner verification (T5.1–T5.12, see phase report).
+Phase 5 awaiting owner verification (T5.1–T5.12, see phase report). Phase 6 DONE. Phase 7
+(wire settings into runtime) is next up.
 D-034 (ship reliability as a v1.1 patch?) remains OPEN, owned by Human.
 
 ## Doc versions

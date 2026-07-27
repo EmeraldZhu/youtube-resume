@@ -327,15 +327,15 @@ These are suspected causes of unreliable resume, derived from reading the v1.0 T
 
 ### Tasks
 
-- [ ] 6.1 — Extend `storageManager.js` with `getSettings()`, `saveSettings(partial)`, and `resetSettings()`. Every read must merge stored values over defaults, so a missing or corrupt key can never produce an undefined setting.
-- [ ] 6.2 — Build the settings view inside the popup as a second view, not a separate page. Gear icon in the list header opens it; back arrow returns.
-- [ ] 6.3 — Implement the six controls per the table above, using segmented buttons and toggles only.
-- [ ] 6.4 — Changes save immediately on interaction. No Save button.
-- [ ] 6.5 — Move `Clear saved progress` into the settings view, retaining the inline confirmation pattern.
-- [ ] 6.6 — Add `Reset to defaults`, also with inline confirmation.
-- [ ] 6.7 — Move the Support and Other tools sections into the settings view, below all utility content.
-- [ ] 6.8 — All copy from UX Spec §7 copy IDs CP-40 through CP-58.
-- [ ] 6.9 — Build with `document.createElement` or static HTML only. No `innerHTML`, no inline `<script>`.
+- [x] 6.1 — Extend `storageManager.js` with `getSettings()`, `saveSettings(partial)`, and `resetSettings()`. Every read must merge stored values over defaults, so a missing or corrupt key can never produce an undefined setting.
+- [x] 6.2 — Build the settings view inside the popup as a second view, not a separate page. Gear icon in the list header opens it; back arrow returns.
+- [x] 6.3 — Implement the six controls per the table above, using segmented buttons and toggles only.
+- [x] 6.4 — Changes save immediately on interaction. No Save button.
+- [x] 6.5 — Move `Clear saved progress` into the settings view, retaining the inline confirmation pattern.
+- [x] 6.6 — Add `Reset to defaults`, also with inline confirmation.
+- [x] 6.7 — Move the Support and Other tools sections into the settings view, below all utility content.
+- [x] 6.8 — All copy from UX Spec §7 copy IDs CP-40 through CP-58.
+- [x] 6.9 — Build with `document.createElement` or static HTML only. No `innerHTML`, no inline `<script>`.
 
 ### Tests
 
@@ -355,8 +355,8 @@ These are suspected causes of unreliable resume, derived from reading the v1.0 T
 
 ### Exit Criteria
 
-- [ ] T6.1–T6.11 all pass
-- [ ] `youtubeResume` and `youtubeResumeSettings` are provably independent (T6.7 and T6.9)
+- [x] T6.1–T6.11 all pass
+- [x] `youtubeResume` and `youtubeResumeSettings` are provably independent (T6.7 and T6.9)
 
 ### Docs to Update
 

@@ -11,6 +11,9 @@
  *   storageManager.saveProgress(videoId, time, duration, title?) → Promise<void>
  *   storageManager.deleteProgress(videoId) → Promise<void>
  *   storageManager.clearAllProgress()      → Promise<void>
+ *   storageManager.getSettings()           → Promise<Settings>
+ *   storageManager.saveSettings(partial)   → Promise<Settings>
+ *   storageManager.resetSettings()         → Promise<Settings>
  *
  * Types:
  *   VideoProgress = { time: number, duration: number, updated: number, title?: string }
@@ -164,9 +167,54 @@ const storageManager = (() => {
     await chrome.storage.local.remove(STORAGE_KEY);
   }
 
+  /**
+   * Returns Settings, merging stored values over DEFAULT_SETTINGS so a
+   * missing or corrupt (e.g. non-object) stored value can never produce
+   * an undefined setting.
+   */
+  async function getSettings() {
+    assertStorageAvailable();
+    const result = await chrome.storage.local.get(SETTINGS_KEY);
+    const stored = result[SETTINGS_KEY];
+    const valid = stored && typeof stored === 'object' ? stored : {};
+    return { ...DEFAULT_SETTINGS, ...valid };
+  }
+
+  /**
+   * Merges partial into the current settings and persists the result.
+   * Never touches youtubeResume or youtubeResumeSchema (D-014).
+   */
+  async function saveSettings(partial) {
+    assertStorageAvailable();
+    const current = await getSettings();
+    const updated = { ...current, ...partial };
+    await chrome.storage.local.set({ [SETTINGS_KEY]: updated });
+    return updated;
+  }
+
+  /**
+   * Restores settings to DEFAULT_SETTINGS. Leaves youtubeResume untouched
+   * (PRD §7.4 / D-014).
+   */
+  async function resetSettings() {
+    assertStorageAvailable();
+    const defaults = { ...DEFAULT_SETTINGS };
+    await chrome.storage.local.set({ [SETTINGS_KEY]: defaults });
+    return defaults;
+  }
+
   migrate();
 
-  return { getProgress, getAllProgress, saveProgress, deleteProgress, clearAllProgress };
+  return {
+    getProgress,
+    getAllProgress,
+    saveProgress,
+    deleteProgress,
+    clearAllProgress,
+    getSettings,
+    saveSettings,
+    resetSettings,
+  };
 })();
 
 

@@ -29,6 +29,7 @@
    - 4.7 [uiInjector.js](#47-uiinjectorjs)
    - 4.8 [youtubeUtils.js](#48-youtubeutilsjs)
    - 4.9 [timeUtils.js](#49-timeutilsjs)
+   - 4.10 [popup/popup.js — Settings Panel](#410-popuppopupjs--settings-panel-v2--phase-6)
 5. [Inter-Module Contracts](#5-inter-module-contracts)
 6. [State Management](#6-state-management)
 7. [Error Handling Strategy](#7-error-handling-strategy)
@@ -652,6 +653,9 @@ storageManager.getAllProgress(): Promise<Record<string, VideoProgress>>
 storageManager.saveProgress(videoId: string, time: number, duration: number, title?: string): Promise<void>
 storageManager.deleteProgress(videoId: string): Promise<void>
 storageManager.clearAllProgress(): Promise<void>
+storageManager.getSettings(): Promise<Settings>              // v2 — Phase 6
+storageManager.saveSettings(partial: Partial<Settings>): Promise<Settings>  // v2 — Phase 6
+storageManager.resetSettings(): Promise<Settings>             // v2 — Phase 6
 ```
 
 #### Types
@@ -795,6 +799,36 @@ blocks resume or tracking.
 - Callers must handle rejections — `storageManager` does not swallow errors internally
 - `migrate()` is the one exception: it catches and logs internally, since it runs unsupervised at load time
 - `getProgress` returns `null` for any missing key — never throws on absence
+
+#### Settings API (v2 — Phase 6)
+
+```javascript
+async function getSettings() {
+  const result = await chrome.storage.local.get(SETTINGS_KEY);
+  const stored = result[SETTINGS_KEY];
+  const valid = stored && typeof stored === 'object' ? stored : {};
+  return { ...DEFAULT_SETTINGS, ...valid };
+}
+
+async function saveSettings(partial) {
+  const current = await getSettings();
+  const updated = { ...current, ...partial };
+  await chrome.storage.local.set({ [SETTINGS_KEY]: updated });
+  return updated;
+}
+
+async function resetSettings() {
+  const defaults = { ...DEFAULT_SETTINGS };
+  await chrome.storage.local.set({ [SETTINGS_KEY]: defaults });
+  return defaults;
+}
+```
+
+`getSettings()` always merges stored values over `DEFAULT_SETTINGS`, so a missing key (first run) or
+a corrupted value (e.g. `youtubeResumeSettings` manually overwritten with a string) can never produce
+an undefined setting — the merge falls back to `{}` when the stored value isn't a plain object.
+`saveSettings(partial)` reads-merges-writes, so callers only pass the keys that changed.
+`resetSettings()` writes `DEFAULT_SETTINGS` verbatim and never touches `youtubeResume` (D-014).
 
 ---
 
@@ -1037,6 +1071,38 @@ function getResumeTime(savedTime) {
   return Math.max(0, savedTime - ROLLBACK_SECONDS);
 }
 ```
+
+---
+
+### 4.10 `popup/popup.js` — Settings Panel (v2 — Phase 6)
+
+**Purpose:** Renders the popup's two views (saved videos list, settings) and wires the settings
+controls to `storageManager`. Owns no storage logic of its own — reads/writes go through
+`storageManager.getSettings()` / `saveSettings()` / `resetSettings()` (§4.6).
+
+**View switching:** `#view-list` and `#view-settings` are sibling containers inside `.container`,
+toggled via a `.hidden` class (`display: none`) — instant replacement, no animation (UX Spec §6.2).
+The gear button (`#settings-btn`, CP-31) shows the settings view; the back button (`#back-btn`,
+CP-41) restores the list view. Exactly one is visible at a time.
+
+**Segmented controls:** each `.segmented` container carries `data-setting="<key>"`; each `.segment`
+button carries `data-value="<value>"`. On click, `Number(dataset.value)` is saved via
+`saveSettings({ [key]: value })` and the group re-renders from the returned settings object (not from
+the clicked button alone), so the UI always reflects what was actually persisted.
+
+**Toggles:** `.toggle` buttons carry `data-setting="<key>"`, `role="switch"`, and toggle
+`aria-checked`/`.active` on click, saving the boolean inverse of their current state.
+
+**No Save button (D7):** every control saves on interaction; `renderSettings(settings)` re-syncs all
+controls' visual state after each write, so a save that got merged with concurrent state elsewhere is
+never silently misrepresented in the UI.
+
+**Destructive actions:** `Clear saved progress` and `Reset to defaults` each use the inline
+confirmation pattern (button hidden, confirmation panel shown in its place) — no `window.confirm()`,
+no modal. `Clear saved progress` calls `storageManager.clearAllProgress()` (removes `youtubeResume`
+only); `Reset to defaults` calls `storageManager.resetSettings()` (removes/overwrites
+`youtubeResumeSettings` only). Each path is wired to a disjoint storage key, which is what makes T6.7
+and T6.9 (cross-key isolation) structurally guaranteed rather than merely tested.
 
 ---
 
