@@ -69,10 +69,11 @@ that made it. A decision that exists only in a chat report is lost when the sess
 
 | ID | Decision | Status | Owner | Implement In | Notes |
 |----|----------|--------|-------|--------------|-------|
-| D-026 | Measure YouTube's live computed styles and record them in `docs/YT_DOM_AUDIT.md` before restyling | **OPEN** | Claude | Phase 5 | Values are measured, never remembered. Blocks D-027 and D-028. |
-| D-027 | Reverse the v1.0 "no background or border on the Restart button" anti-pattern | APPROVED | Human | Phase 5 | YouTube moved to rounded-pill controls; the old rule now *causes* the mismatch. |
-| D-028 | Fix the toast/progress-bar collision by deriving the offset from measured control-bar height | APPROVED | Human | Phase 5 | Confirmed in the owner's screenshot: the red line runs through the toast. `bottom: 48px` is stale. |
-| D-029 | Toast promoted from optional to required, and made user-disableable | APPROVED | Human | Phase 5 | It already ships; specifying it properly is overdue. |
+| D-026 | Measure YouTube's live computed styles and record them in `docs/YT_DOM_AUDIT.md` before restyling | DONE | Claude | Phase 5 | Values are measured, never remembered. Blocks D-027 and D-028. |
+| D-027 | Reverse the v1.0 "no background or border on the Restart button" anti-pattern | DONE | Human | Phase 5 | YouTube moved to rounded-pill controls; the old rule now *causes* the mismatch. |
+| D-028 | Fix the toast/progress-bar collision by deriving the offset from measured control-bar height | DONE | Human | Phase 5 | Confirmed in the owner's screenshot: the red line runs through the toast. `bottom: 48px` is stale. |
+| D-029 | Toast promoted from optional to required, and made user-disableable | DONE | Human | Phase 5 | It already ships; specifying it properly is overdue. Disable switch itself is `showToast`, wired in Phase 7 — this phase only fixes its visuals and confirms it's unconditional pending that setting. |
+| D-046 | Measurement (`docs/YT_DOM_AUDIT.md`) found no native inline text-pill button in the control bar — icon buttons are flat with opacity-only hover. Restart button pill fill/radius instead derived from the measured `.ytp-menuitem` hover intensity (`rgba(255,255,255,0.1)` rest / `0.2` hover) and the 40px control-row height (`20px` radius); toast background/radius taken directly from the measured `.ytp-settings-menu` panel (`rgba(0,0,0,0.6)`, `12px`) | DONE | Claude | Phase 5 | Tier 2 value pick, filling the gap between D-027's approved reversal and what measurement actually showed. Toast's `bottom` offset is computed at runtime from `.ytp-chrome-bottom`'s measured height (`59px`, identical in default/theater) + 12px clearance, not hard-coded, per D-028. |
 
 ## Docs & release
 

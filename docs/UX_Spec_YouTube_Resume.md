@@ -150,23 +150,28 @@ Injected as the **next sibling** of `.ytp-time-display` inside `.ytp-left-contro
 
 #### Styling
 
-> **Values in this table are measured, not assumed.** Phase 5 of ROADMAP_v2.md produces `docs/YT_DOM_AUDIT.md` from computed styles on a live YouTube watch page. On completion of Phase 5 this table is replaced with those measured values. Until then, the **intent** column governs.
+> **Measured, not assumed** — from `docs/YT_DOM_AUDIT.md` (Phase 5, D-026/D-046), read via
+> `getComputedStyle()` on a live YouTube watch page. No native inline **text** button exists in the
+> control bar to copy directly (icon buttons are flat, opacity-hover only — see the audit's
+> "Finding"), so the pill fill and radius are derived from the nearest real analog: the measured
+> `.ytp-menuitem` hover intensity and the 40px control-row height.
 
-| Property | v1.0 value | v2.0 intent |
+| Property | v1.0 value | v2.0 value (measured/derived) |
 |---|---|---|
-| `font-family` | `Roboto, Arial, sans-serif` | Match the measured control-bar stack |
-| `font-size` | `12px` | Match `.ytp-time-display` exactly. v1.0's 12px is suspected undersized against YouTube's current type scale |
-| `font-weight` | `500` | Match `.ytp-time-display` |
-| `color` | `#ffffff` | Match native control text |
-| `background` | `none` | **Reversed.** Match native control buttons — if YouTube uses a pill background, so does this |
-| `border-radius` | *(none)* | **New.** Match the measured native control radius |
-| `border` | `none` | Retained unless measurement shows otherwise |
-| `padding` | `0 8px` | Derive from measured native button padding |
-| `opacity` (default) | `0.9` | Match native controls; do not sit below them |
-| Hover treatment | opacity → `1.0` | **Match the native hover treatment exactly**, including background fill if YouTube uses one |
+| `font-family` | `Roboto, Arial, sans-serif` | `"YouTube Noto", Roboto, Arial, Helvetica, sans-serif` — matches `.ytp-time-display` |
+| `font-size` | `12px` | `14px` — matches `.ytp-time-display`; v1.0's 12px was confirmed undersized (V5) |
+| `font-weight` | `500` | `500` — matches `.ytp-time-display` |
+| `color` | `#ffffff` | `#eeeeee` — matches `.ytp-time-display` |
+| `background` (rest) | `none` | **Reversed.** `rgba(255, 255, 255, 0.1)` — measured `.ytp-menuitem` hover-fill intensity, applied at rest since no native rest-state pill exists to copy |
+| `background` (hover) | *(n/a)* | `rgba(255, 255, 255, 0.2)` — double the rest fill, giving clear hover affordance |
+| `border-radius` | *(none)* | `20px` — full pill, derived from the 40px control-row height |
+| `border` | `none` | `none` — no native control uses a border, only background fills |
+| `padding` | `0 8px` | `0 12px` |
+| `height` / `line-height` | *(none)* / `1` | `40px` / `40px` — matches the native control row height |
+| Hover treatment | opacity → `1.0` | Background fill only (see above) — opacity stays `1` at all times |
 | `cursor` | `pointer` | Retained |
 | `vertical-align` | `middle` | Retained |
-| `line-height` | `1` | Retained |
+| `transition` | *(none)* | `background-color 0.1s cubic-bezier(0, 0, 0.2, 1)` — matches measured native icon-button transition timing |
 
 **The test is not "does it follow the table". The test is "can you tell which control the extension added".**
 
@@ -204,7 +209,7 @@ The `↺` glyph is the implicit separator from the time display. No divider char
 | `"↩ Restart"` | `↩` implies undo; `↺` implies replay |
 | A persistent button | It is not a permanent control |
 | **Styling from this document rather than from measurement** | The cause of the v1.0 mismatch |
-| **A flat borderless button when YouTube's controls are pills** | *(reverses the v1.0 rule)* Matching a rule instead of matching YouTube is how the button came to look foreign |
+| **A flat borderless button** | *(reversed in v2.0, D-027)* Confirmed via `docs/YT_DOM_AUDIT.md`: matching the old rule instead of shipping a real pill is what made the button read as foreign next to a rounded chip aesthetic elsewhere in the player (the settings-menu overlay) |
 
 ---
 
@@ -266,20 +271,22 @@ Lower-left of the video frame, **fully clear of the progress bar**.
 
 #### Styling
 
-> As with §4.3, values are replaced by measurements from `docs/YT_DOM_AUDIT.md` on completion of Phase 5. The intent column governs until then.
+> Measured from `docs/YT_DOM_AUDIT.md` (Phase 5, D-026/D-046) — the `.ytp-settings-menu` popup
+> panel is YouTube's own current overlay-chip component, so its background and radius are used
+> directly rather than approximated.
 
-| Property | v1.0 value | v2.0 intent |
+| Property | v1.0 value | v2.0 value (measured/derived) |
 |---|---|---|
-| `background` | `rgba(0, 0, 0, 0.75)` | Match the measured opacity of YouTube's own overlay chips |
-| `color` | `#ffffff` | Retained |
-| `font-family` | `Roboto, Arial, sans-serif` | Match measured overlay font stack |
-| `font-size` | `13px` | Match measured overlay text size |
-| `font-weight` | `400` | Match measured |
-| `padding` | `6px 12px` | Match measured chip padding |
-| `border-radius` | `2px` | **Increase to match YouTube's current chip radius.** This is a confirmed defect |
+| `background` | `rgba(0, 0, 0, 0.75)` | `rgba(0, 0, 0, 0.6)` — matches the measured `.ytp-settings-menu` panel |
+| `color` | `#ffffff` | `#eeeeee` — matches `.ytp-time-display` |
+| `font-family` | `Roboto, Arial, sans-serif` | `"YouTube Noto", Roboto, Arial, Helvetica, sans-serif` |
+| `font-size` | `13px` | `13px` — matches the measured `.ytp-tooltip` size (≈12.98px), retained |
+| `font-weight` | `400` | `500` — matches the measured `.ytp-tooltip` weight |
+| `padding` | `6px 12px` | `8px 14px` |
+| `border-radius` | `2px` | `12px` — matches the measured `.ytp-settings-menu` panel. Confirmed defect (V2), now fixed |
 | `position` | `absolute` | Retained |
-| `bottom` | `48px` | **Derive from the measured control-bar height.** Must clear the progress bar in default, theater, and fullscreen |
-| `left` | `12px` | **Increase to match YouTube's overlay inset** |
+| `bottom` | `48px` | **Derived at runtime** from `.ytp-chrome-bottom`'s measured height + 12px clearance (D-028), not hard-coded — measured `59px` control-bar height holds identically in default and theater mode |
+| `left` | `12px` | `16px` — in the same range as the measured `.ytp-cards-button` corner inset (8–12px), increased per V3 |
 | `z-index` | Overlay layer | Retained |
 | `pointer-events` | `none` | Retained — non-negotiable |
 
@@ -658,7 +665,7 @@ The single source of truth for all user-facing text.
 | Anti-Pattern | Correct Approach |
 |---|---|
 | **Styling in-player UI from this document instead of from measurement** | Read computed values from live YouTube; record them in `YT_DOM_AUDIT.md` |
-| ~~Restart button with background fill or border~~ | **Reversed in v2.0.** Match YouTube's current control shape, including a pill background if that is what YouTube uses |
+| ~~Restart button with background fill or border~~ | **Reversed in v2.0 (D-027).** No native inline text button exists to copy, so the pill fill is derived from the measured `.ytp-menuitem` hover intensity (`docs/YT_DOM_AUDIT.md`) rather than the old borderless rule |
 | Toast overlapping the progress bar | Derive the vertical offset from the measured control-bar height; verify in all player modes |
 | Toast with a square or near-square corner radius | Match YouTube's current overlay chip radius |
 | Toast that requires dismissal | `pointer-events: none`; auto-fade; never blocking |

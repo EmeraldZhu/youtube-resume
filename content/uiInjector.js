@@ -53,25 +53,34 @@ const uiInjector = (() => {
     button.title = 'Restart video from the beginning';
     button.setAttribute('aria-label', 'Restart video from the beginning');
 
-    // Styling — match YouTube's control bar aesthetics (UX Spec §4.3)
+    // Styling — measured against live YouTube DOM (docs/YT_DOM_AUDIT.md, D-046).
+    // Font/color match .ytp-time-display exactly. No native inline text button exists
+    // to copy for the pill treatment, so the fill borrows the measured .ytp-menuitem
+    // hover intensity and the radius is derived from the 40px control-row height.
+    const REST_BG = 'rgba(255, 255, 255, 0.1)';
+    const HOVER_BG = 'rgba(255, 255, 255, 0.2)';
     Object.assign(button.style, {
-      background:     'none',
+      background:     REST_BG,
       border:         'none',
-      color:          '#ffffff',
-      fontSize:       '12px',
-      fontFamily:     'Roboto, Arial, sans-serif',
+      borderRadius:   '20px',
+      color:          '#eeeeee',
+      fontSize:       '14px',
+      fontFamily:     '"YouTube Noto", Roboto, Arial, Helvetica, sans-serif',
       fontWeight:     '500',
       cursor:         'pointer',
-      padding:        '0 8px',
-      lineHeight:     '1',
-      opacity:        '0.9',
+      padding:        '0 12px',
+      height:         '40px',
+      lineHeight:     '40px',
+      display:        'inline-block',
+      boxSizing:      'border-box',
       verticalAlign:  'middle',
-      letterSpacing:  '0.01em',
+      letterSpacing:  'normal',
+      transition:     'background-color 0.1s cubic-bezier(0, 0, 0.2, 1)',
     });
 
     // Hover behavior
-    button.addEventListener('mouseover', () => { button.style.opacity = '1'; });
-    button.addEventListener('mouseout',  () => { button.style.opacity = '0.9'; });
+    button.addEventListener('mouseover', () => { button.style.background = HOVER_BG; });
+    button.addEventListener('mouseout',  () => { button.style.background = REST_BG; });
 
     // Click behavior — reset to beginning, delete storage, remove button
     button.addEventListener('click', () => {
@@ -110,18 +119,18 @@ const uiInjector = (() => {
     toast.setAttribute('role', 'status');
     toast.setAttribute('aria-live', 'polite');
 
-    // Styling per UX Spec §5.4
+    // Styling — measured against live YouTube DOM (docs/YT_DOM_AUDIT.md, D-046).
+    // Background/radius match the measured .ytp-settings-menu overlay-chip treatment.
     Object.assign(toast.style, {
-      background:     'rgba(0, 0, 0, 0.75)',
-      color:          '#ffffff',
-      fontFamily:     'Roboto, Arial, sans-serif',
+      background:     'rgba(0, 0, 0, 0.6)',
+      color:          '#eeeeee',
+      fontFamily:     '"YouTube Noto", Roboto, Arial, Helvetica, sans-serif',
       fontSize:       '13px',
-      fontWeight:     '400',
-      padding:        '6px 12px',
-      borderRadius:   '2px',
+      fontWeight:     '500',
+      padding:        '8px 14px',
+      borderRadius:   '12px',
       position:       'absolute',
-      bottom:         '48px',
-      left:           '12px',
+      left:           '16px',
       zIndex:         '99',
       pointerEvents:  'none',
       opacity:        '0',
@@ -134,6 +143,14 @@ const uiInjector = (() => {
       console.warn('[YTResume] Could not find #movie_player — toast not injected');
       return;
     }
+
+    // Derive the vertical offset from the measured control-bar height (D-028) instead
+    // of a hard-coded value — this self-corrects if YouTube resizes the control bar,
+    // and holds across default/theater since the bar's height doesn't change with them.
+    const CONTROL_BAR_CLEARANCE_PX = 12;
+    const chromeBottom = player.querySelector('.ytp-chrome-bottom');
+    const controlBarHeight = chromeBottom ? chromeBottom.getBoundingClientRect().height : 59;
+    toast.style.bottom = `${controlBarHeight + CONTROL_BAR_CLEARANCE_PX}px`;
 
     player.appendChild(toast);
     toastElement = toast;

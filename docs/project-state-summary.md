@@ -14,7 +14,7 @@
 | 2 | Resume Engine Hardening | DONE | — |
 | 3 | Progress Tracking Hardening | DONE | — |
 | 4 | Storage Schema v2, Title Capture & Migration | DONE | — |
-| 5 | In-Player UI Re-Calibration | NOT STARTED | — |
+| 5 | In-Player UI Re-Calibration | AWAITING VERIFICATION | — |
 | 6 | Settings Store & Settings Panel | NOT STARTED | — |
 | 7 | Wire Settings Into Runtime | NOT STARTED | — |
 | 8 | Saved Videos Panel | NOT STARTED | — |
@@ -42,14 +42,15 @@ v1.0 popup, bootstrap orchestration.
 - Progress tracking (Phase 3) fixed, owner-verified: delta guard on interval only (D-024),
   `ended` handler added (H6 fixed), `pagehide` replaces `beforeunload` (D-025), invalid-position
   guard incl. NaN-duration hole (D-042/D-043).
-- Restart button/toast don't match YouTube's current UI: toast overlaps progress bar (D-028),
-  button is bare text among pill controls (D-027).
+- Restart button/toast visuals re-calibrated against measured live DOM (Phase 5, awaiting
+  verification): toast offset now derived at runtime from control-bar height (D-028), button
+  gets a measured pill fill (D-027/D-046 — no native text-pill exists to copy directly).
 - No settings panel or saved-videos panel yet (schema/storage side done in Phase 4, owner-verified
   incl. against a real v1.0 profile; Phases 6/8 build the UI).
 
 ## Next action
 
-Phase 4 confirmed DONE by owner. Next is Phase 5 — In-Player UI Re-Calibration.
+Phase 5 code complete, awaiting owner verification (T5.1–T5.12, see phase report).
 D-034 (ship reliability as a v1.1 patch?) remains OPEN, owned by Human.
 
 ## Doc versions

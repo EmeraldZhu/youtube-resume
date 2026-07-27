@@ -800,12 +800,18 @@ blocks resume or tracking.
 
 ### 4.7 `uiInjector.js`
 
-**Purpose:** Inject the Restart button into YouTube's player controls, manage its visibility lifecycle, and handle click behavior.
+*(Updated Phase 5 — D-026/D-027/D-028/D-046. Styling values are measured against live YouTube DOM,
+see `docs/YT_DOM_AUDIT.md`, not assumed. The v1.0 shape below omitted the toast entirely — it now
+ships as `showToast`.)*
+
+**Purpose:** Inject the Restart button and resume toast into YouTube's player, manage their
+visibility lifecycle, and handle click behavior.
 
 #### Public API
 
 ```typescript
 uiInjector.showRestartButton(video: HTMLVideoElement, videoId: string): void
+uiInjector.showToast(resumeTime: number): void
 uiInjector.cleanup(): void
 ```
 
@@ -814,6 +820,8 @@ uiInjector.cleanup(): void
 ```typescript
 let buttonElement: HTMLElement | null = null;
 let dismissTimer: number | null = null;
+let toastElement: HTMLElement | null = null;
+let toastTimeout: number | null = null;
 const DISMISS_DELAY_MS = 7000; // 7 seconds, within the 5–10s spec range
 ```
 
@@ -823,30 +831,37 @@ const DISMISS_DELAY_MS = 7000; // 7 seconds, within the 5–10s spec range
 
 ```javascript
 function showRestartButton(video, videoId) {
-  cleanup(); // Remove any existing button first
+  removeButton(); // Remove any existing button (not full cleanup — preserve toast)
 
   const button = document.createElement('button');
   button.id = 'yt-resume-restart-btn';
   button.textContent = '↺ Restart';
 
-  // Styling — match YouTube's control bar aesthetics
+  // Styling — measured against live YouTube DOM (docs/YT_DOM_AUDIT.md). No native inline
+  // text button exists to copy, so the pill fill/radius are derived from the measured
+  // .ytp-menuitem hover intensity and the 40px control-row height.
+  const REST_BG = 'rgba(255, 255, 255, 0.1)';
+  const HOVER_BG = 'rgba(255, 255, 255, 0.2)';
   Object.assign(button.style, {
-    background:     'none',
+    background:     REST_BG,
     border:         'none',
-    color:          '#ffffff',
-    fontSize:       '12px',
-    fontFamily:     'Roboto, Arial, sans-serif',
+    borderRadius:   '20px',
+    color:          '#eeeeee',
+    fontSize:       '14px',
+    fontFamily:     '"YouTube Noto", Roboto, Arial, Helvetica, sans-serif',
     fontWeight:     '500',
     cursor:         'pointer',
-    padding:        '0 8px',
-    lineHeight:     '1',
-    opacity:        '0.9',
+    padding:        '0 12px',
+    height:         '40px',
+    lineHeight:     '40px',
+    display:        'inline-block',
+    boxSizing:      'border-box',
     verticalAlign:  'middle',
-    letterSpacing:  '0.01em',
+    transition:     'background-color 0.1s cubic-bezier(0, 0, 0.2, 1)',
   });
 
-  button.addEventListener('mouseover', () => { button.style.opacity = '1'; });
-  button.addEventListener('mouseout',  () => { button.style.opacity = '0.9'; });
+  button.addEventListener('mouseover', () => { button.style.background = HOVER_BG; });
+  button.addEventListener('mouseout',  () => { button.style.background = REST_BG; });
 
   button.addEventListener('click', () => {
     video.currentTime = 0;
@@ -866,7 +881,64 @@ function showRestartButton(video, videoId) {
   }
 
   // Auto-dismiss
-  dismissTimer = setTimeout(() => cleanup(), DISMISS_DELAY_MS);
+  dismissTimer = setTimeout(() => removeButton(), DISMISS_DELAY_MS);
+}
+```
+
+**`showToast(resumeTime)`:**
+
+```javascript
+function showToast(resumeTime) {
+  removeToast();
+
+  const toast = document.createElement('div');
+  toast.id = 'yt-resume-toast';
+  toast.textContent = `Resumed from ${formatTime(resumeTime)}`;
+  toast.setAttribute('role', 'status');
+  toast.setAttribute('aria-live', 'polite');
+
+  // Styling — measured against live YouTube DOM. Background/radius match the
+  // .ytp-settings-menu overlay-chip panel, YouTube's own current chip treatment.
+  Object.assign(toast.style, {
+    background:     'rgba(0, 0, 0, 0.6)',
+    color:          '#eeeeee',
+    fontFamily:     '"YouTube Noto", Roboto, Arial, Helvetica, sans-serif',
+    fontSize:       '13px',
+    fontWeight:     '500',
+    padding:        '8px 14px',
+    borderRadius:   '12px',
+    position:       'absolute',
+    left:           '16px',
+    zIndex:         '99',
+    pointerEvents:  'none',
+    opacity:        '0',
+    transition:     'opacity 200ms ease-out',
+  });
+
+  const player = document.querySelector('#movie_player');
+  if (!player) {
+    console.warn('[YTResume] Could not find #movie_player — toast not injected');
+    return;
+  }
+
+  // Derive the vertical offset from the measured control-bar height (D-028) instead of a
+  // hard-coded value, so it self-corrects if YouTube resizes the control bar.
+  const chromeBottom = player.querySelector('.ytp-chrome-bottom');
+  const controlBarHeight = chromeBottom ? chromeBottom.getBoundingClientRect().height : 59;
+  toast.style.bottom = `${controlBarHeight + 12}px`;
+
+  player.appendChild(toast);
+  toastElement = toast;
+
+  // Fade in (200ms) → hold (1600ms) → fade out (400ms) → remove from DOM
+  requestAnimationFrame(() => {
+    toast.style.opacity = '1';
+    toastTimeout = setTimeout(() => {
+      toast.style.transition = 'opacity 400ms ease-in';
+      toast.style.opacity = '0';
+      toastTimeout = setTimeout(() => removeToast(), 400);
+    }, 200 + 1600);
+  });
 }
 ```
 
@@ -874,20 +946,16 @@ function showRestartButton(video, videoId) {
 
 ```javascript
 function cleanup() {
-  clearTimeout(dismissTimer);
-  dismissTimer = null;
-
-  if (buttonElement && buttonElement.parentNode) {
-    buttonElement.parentNode.removeChild(buttonElement);
-  }
-  buttonElement = null;
+  removeButton();
+  removeToast();
 }
 ```
 
 #### DOM Injection Notes
-- Button is created via `document.createElement` — never via `innerHTML`
-- Injection uses `insertBefore` to preserve surrounding control layout
-- Button ID `yt-resume-restart-btn` allows safe idempotent removal
+- Button and toast are created via `document.createElement` — never via `innerHTML`
+- Button injection uses `insertBefore` to preserve surrounding control layout; toast appends into `#movie_player`
+- Element IDs `yt-resume-restart-btn` / `yt-resume-toast` allow safe idempotent removal
+- Toast is removed from the DOM entirely after fade-out — never left hidden
 
 #### Error Behavior
 - If `.ytp-time-display` is not found, log warning and exit without injecting — resume still occurred
@@ -1067,7 +1135,9 @@ These selectors are subject to change if YouTube updates its player markup. If a
 | Ad active — pre-roll | `.ad-showing` on `#movie_player` | `playerObserver`, `progressTracker` | Class present during ad |
 | Ad active — mid-roll | `.ad-interrupting` on `#movie_player` | `playerObserver`, `progressTracker` | Class present during mid-roll |
 | Controls left bar | `.ytp-left-controls` | `uiInjector` | Parent context of injection zone |
-| Time display | `.ytp-time-display` | `uiInjector` | Restart button injected as next sibling |
+| Time display | `.ytp-time-display` | `uiInjector` | Restart button injected as next sibling; font/color values sourced from it (measured, `YT_DOM_AUDIT.md`) |
+| Control bar | `.ytp-chrome-bottom` | `uiInjector` | Height read at runtime to derive toast `bottom` offset (D-028); measured `59px`, stable across default/theater |
+| Settings menu panel | `.ytp-settings-menu` | `uiInjector` (reference only, not queried at runtime) | Source of the toast's measured `background`/`border-radius` values |
 
 ---
 
