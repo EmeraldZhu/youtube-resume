@@ -12,7 +12,7 @@
 | 0 | Defect Diagnosis & Instrumentation | AWAITING VERIFICATION | — |
 | 1 | Identity Hardening | DONE | — |
 | 2 | Storage Integrity | AWAITING VERIFICATION | — |
-| 3 | Resume Gate & Write Protection | NOT STARTED | — |
+| 3 | Resume Gate & Write Protection | AWAITING VERIFICATION | — |
 | 4 | Pinning Data Layer | NOT STARTED | — |
 | 5 | Pinning UI | NOT STARTED | — |
 | 6 | Doc Reconciliation, Regression & Store Release | NOT STARTED | — |
@@ -49,15 +49,14 @@ in-player UI (Phase 5), single-`setInterval` fix (D-059). Full history in `docs/
 
 ## Next action
 
-Phase 0 AWAITING VERIFICATION (owner review needed — see ROADMAP_v3.md "Phase 0 Findings"). **Phase 1
-DONE** (owner-confirmed). **Phase 2 AWAITING VERIFICATION** — self-verified live via
-`chrome-devtools-mcp` (see ROADMAP_v3.md "Phase 2 Findings"): migration chain, duplicate-merge, and
-unresolved-videoId rejection all pass T2.1–T2.8; D-070 dropped (no legacy key exists, retired);
-read-path investigation for defect B's third hypothesis found nothing reproducible (D-088); a
-whitespace-only-title write-back gap was found and closed (D-087). No owner action needed — nothing
-in this phase needed a real browser or eyes. Phase 3 next — defect C is confirmed. **Drift fixed:**
-TDD §4.6 now covers Phase 2's migration/merge/rejection/write-back logic too; still stale on pinning
-and the rest of `debugLogger.js`.
+Phases 0/2/3 AWAITING VERIFICATION (owner review needed for Phase 0's visual-facing implications; 2
+and 3 self-verified live via `chrome-devtools-mcp`, no owner action needed — see ROADMAP_v3.md's
+"Phase N Findings" per phase). **Phase 1 DONE** (owner-confirmed). Phase 3: `progressTracker`
+disarms on load, arms only once `tryResume()` settles (D-066/D-091); one native-override re-assert
+(D-090); interval-only backward-jump write guard closes defect C structurally (D-090); Restart button
+needed and got an explicit baseline-reset call — a real false-positive bug found and fixed live
+(D-092), not just insurance. Phase 4 (pinning) next. **Drift fixed:** TDD §4.4/§4.5 now cover the
+arm/disarm gate and write guards; still stale on pinning and the rest of `debugLogger.js`.
 
 ## Doc versions
 

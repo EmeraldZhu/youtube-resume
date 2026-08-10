@@ -90,6 +90,11 @@ const uiInjector = (() => {
     // Click behavior — reset to beginning, delete storage, remove button
     button.addEventListener('click', () => {
       video.currentTime = 0;
+      // Roadmap 3.6 — explicit exemption for this specific path: resets the
+      // backward-jump guard's baseline directly rather than relying on
+      // whichever native 'seeked' behavior a programmatic assignment does or
+      // doesn't trigger.
+      progressTracker.notifyExternalReset();
       storageManager.deleteProgress(videoId)
         .catch(err => console.warn('[YTResume] Delete failed:', err.message));
       cleanup();

@@ -8,6 +8,8 @@
  *   progressTracker.start(video, videoId, settings) → void
  *   progressTracker.stop()                          → void
  *   progressTracker.tick()                          → void
+ *   progressTracker.arm()                           → void
+ *   progressTracker.notifyExternalReset()           → void
  */
 
 const progressTracker = (() => {
@@ -20,6 +22,17 @@ const progressTracker = (() => {
   let activeVideo = null;
   let activeVideoId = null;
   let minWatchSeconds = 30; // read once per navigation in start() (Roadmap 7.3)
+  // Disarmed on every start() (Roadmap 3.1) — no write (interval or event) is
+  // accepted until arm() is called once bootstrap.js's resume lifecycle for
+  // this video has resolved (Roadmap 3.2).
+  let armed = false;
+  // Tier 2 pick (Roadmap 3.6) — a backward jump larger than this on an
+  // interval-triggered save is treated as a spurious read (defect C), not a
+  // real seek. Real backward seeks are exempt structurally: their own
+  // 'seeked'-triggered save already updates lastSavedTime to the new
+  // position before the next interval tick runs, so no separate "recent
+  // seek" flag is needed.
+  const BACKWARD_JUMP_THRESHOLD_S = 30;
 
   // Bound handler references for proper removal
   let handlePause = null;
@@ -48,6 +61,10 @@ const progressTracker = (() => {
     });
 
     if (!activeVideo || !activeVideoId) return;
+    if (!armed) {
+      debugLogger.log('attemptSave:skipped', { videoId: activeVideoId, trigger, reason: 'disarmed' });
+      return; // Roadmap 3.1 — no write until the resume lifecycle has resolved
+    }
     if (playerObserver.isAdPlaying()) {
       debugLogger.log('attemptSave:skipped', { videoId: activeVideoId, trigger, reason: 'adPlaying' });
       return;
@@ -68,6 +85,19 @@ const progressTracker = (() => {
     if (!timeUtils.meetsMinimumWatched(current, minWatchSeconds)) {
       debugLogger.log('attemptSave:skipped', { videoId: activeVideoId, trigger, reason: 'belowMinWatch', current, minWatchSeconds });
       return; // Roadmap 7.5 — no storage entry for a video watched less than this
+    }
+
+    // Roadmap 3.6 — regression guard: an interval-triggered save landing far
+    // below the last known-good position is treated as a spurious read
+    // (defect C's mechanism, Phase 0 finding 0.8) and rejected outright.
+    // Interval-only: every event trigger (seeked/pause/ended/visibility/
+    // pagehide) represents observed user intent or a session boundary and is
+    // exempt by construction (D-024's bypassDelta=true already marks them).
+    if (!bypassDelta && (lastSavedTime - current) > BACKWARD_JUMP_THRESHOLD_S) {
+      debugLogger.log('attemptSave:skipped', {
+        videoId: activeVideoId, trigger, reason: 'backwardJumpRejected', current, lastSavedTime,
+      });
+      return;
     }
 
     const deltaBlocked = !bypassDelta && Math.abs(current - lastSavedTime) < 5;
@@ -104,6 +134,7 @@ const progressTracker = (() => {
     minWatchSeconds = settings.minWatchSeconds ?? 30;
     lastSavedTime = Math.floor(video.currentTime);
     ticksSinceSave = 0;
+    armed = false; // Roadmap 3.1 — disarmed on every load; bootstrap.js calls arm() once the resume lifecycle resolves
 
     // Event-based triggers — all save unconditionally (D-024)
     handlePause = () => attemptSave(true, 'pause');
@@ -138,11 +169,37 @@ const progressTracker = (() => {
   }
 
   /**
+   * Arms tracking, allowing attemptSave() to actually write. Called by
+   * bootstrap.js once the resume lifecycle for the current video has
+   * resolved — a completed tryResume() (success or verified give-up) or,
+   * for a fresh video with no saved entry, immediately (Roadmap 3.2).
+   */
+  function arm() {
+    armed = true;
+    debugLogger.log('progressTracker:armed', { videoId: activeVideoId });
+  }
+
+  /**
+   * Called by uiInjector's Restart control immediately after it forces
+   * video.currentTime to 0 directly. Resets the backward-jump guard's
+   * baseline to 0 so replaying past minWatchSeconds afterward isn't
+   * mistaken for a spurious near-zero overwrite (Roadmap 3.6) — an
+   * explicit exemption for this specific path, not a reliance on whatever
+   * native 'seeked' behavior a programmatic currentTime assignment does or
+   * doesn't trigger.
+   */
+  function notifyExternalReset() {
+    lastSavedTime = 0;
+    debugLogger.log('progressTracker:externalReset', { videoId: activeVideoId });
+  }
+
+  /**
    * Removes all event listeners and resets internal state. Idempotent —
    * safe to call multiple times or before start().
    */
   function stop() {
     ticksSinceSave = 0;
+    armed = false;
 
     if (activeVideo) {
       if (handlePause) activeVideo.removeEventListener('pause', handlePause);
@@ -164,7 +221,7 @@ const progressTracker = (() => {
     minWatchSeconds = 30;
   }
 
-  return { start, stop, tick };
+  return { start, stop, tick, arm, notifyExternalReset };
 })();
 
 

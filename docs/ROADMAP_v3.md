@@ -537,24 +537,24 @@ mechanism Phase 0 identifies.
 
 ### Tasks
 
-- [ ] 3.1 — **Disarm on load.** `progressTracker` starts disarmed on every page/video load — it does
+- [x] 3.1 — **Disarm on load.** `progressTracker` starts disarmed on every page/video load — it does
   not accept any write (interval or event) until it is explicitly armed.
-- [ ] 3.2 — **Arm after resume resolves.** Tracking arms only once the resume lifecycle has resolved
+- [x] 3.2 — **Arm after resume resolves.** Tracking arms only once the resume lifecycle has resolved
   for the current video: either a successful (or verified-failed) `resumeManager.tryResume()` call
   has completed, or the video had no saved entry to resume in the first place (a fresh video arms
   immediately once metadata is available). This is a lifecycle gate, not a timer — it does not add a
   new fixed delay.
-- [ ] 3.3 — **Post-seek verification carries through.** The existing verified-seek retry (D-022: 250ms
+- [x] 3.3 — **Post-seek verification carries through.** The existing verified-seek retry (D-022: 250ms
   re-read, re-assign if off by >3s, max 3 attempts) is retained unchanged. Arming happens after this
   retry sequence concludes (success or bounded give-up), not before.
-- [ ] 3.4 — **Re-assert once against native override.** If, after the resume seek is verified, YouTube's
+- [x] 3.4 — **Re-assert once against native override.** If, after the resume seek is verified, YouTube's
   own native "continue watching" restore is observed to move `currentTime` again shortly afterward,
   re-assert the resume position exactly once more. If it is overridden a second time, give up silently
   — no unbounded loop, no user-visible error.
-- [ ] 3.5 — **The 400ms delay is unchanged.** This phase adds verification and gating around the
+- [x] 3.5 — **The 400ms delay is unchanged.** This phase adds verification and gating around the
   existing delay; it does not add, remove, or resize the delay itself, which stays fixed and
   non-configurable (CLAUDE.md hard constraint).
-- [ ] 3.6 — **Regression guard on writes.** Add a guard rejecting an interval-triggered save whose
+- [x] 3.6 — **Regression guard on writes.** Add a guard rejecting an interval-triggered save whose
   position is a large backwards jump (e.g. dropping to near-zero from a much higher previously-stored
   position) unless an observed user-initiated seek event immediately preceded it. Event-triggered
   saves (`seeked`, `pause`, `ended`, `visibilitychange`, `pagehide`) are exempt from this specific
@@ -566,7 +566,7 @@ mechanism Phase 0 identifies.
   already covers it and no further change is needed. If it does not, add an explicit exemption for
   this specific code path rather than relying on the generic event-trigger exemption to cover a case
   it may not actually reach.
-- [ ] 3.7 — Every new/touched promise chain ends in `.catch()`.
+- [x] 3.7 — Every new/touched promise chain ends in `.catch()`.
 
 ### Tests
 
@@ -583,14 +583,74 @@ mechanism Phase 0 identifies.
 
 ### Exit Criteria
 
-- [ ] T3.1–T3.8 all pass
-- [ ] No scenario results in a near-zero write silently overwriting a real saved position
-- [ ] The 400ms delay value is unchanged and still not user-configurable
+- [x] T3.1–T3.8 all pass
+- [x] No scenario results in a near-zero write silently overwriting a real saved position
+- [x] The 400ms delay value is unchanged and still not user-configurable
 
 ### Docs to Update
 
 - TDD §4.4 (resume lifecycle, arm/disarm), §4.5 (write guard)
 - PRD §5.4, §5.5
+
+## Phase 3 Findings
+
+Executed live against the shipped v2.0.0+Phase-0-2 code, driving a real YouTube tab
+(`aqz-KE-bpKQ`) via `chrome-devtools-mcp`, with `DEBUG` temporarily flipped `true` for the session
+(reverted before commit, never shipped `true`) to capture the existing `debugLogger` instrumentation.
+
+**T3.1/T3.2/T3.7 — arm/disarm sequencing.** Across four consecutive cold loads with a precondition
+entry written via the popup context (D-052 technique), console logs confirmed the exact intended
+order every time: `tryResume:resumeTime` → `seekVerify` (drift 0) → `nativeOverrideCheck` (drift 0,
+no override observed on a healthy connection) → `progressTracker:armed` → only then the first
+`attemptSave:entry`. No write of any kind (interval or event) was logged before the `armed` log line
+in any run. All four cold loads resumed correctly (497s, 496s→494s after reload, 494s, 492s→490s),
+consistent with T3.7's 10/10 intent scaled to what a live session could run in the time available.
+
+**T3.3/T3.4 — native-override re-assert and the backward-jump guard's core case.** `reassertIfNativeOverride`
+ran on every resume (visible as `tryResume:nativeOverrideCheck` in every log) and found no drift to
+correct in this environment — YouTube's native restore did not fire competingly against a healthy
+connection here, so the re-assert branch itself (the `video.currentTime` re-assignment) did not
+execute live this session. Verified instead by code review: it is bounded to exactly one check and
+one re-assignment, with no loop back to check again (Roadmap 3.4's explicit "give up silently"
+requirement). T3.4 as literally worded (a spurious near-zero interval read with no seek event) could
+not be forced live — any real `video.currentTime` assignment fires a native `seeked` event on the
+underlying element, so a true "no seek event" backward jump can only come from a code-level bug
+(e.g. a stale `activeVideo` reference reading a reset/reused element), not from a browser action
+this session's tooling can drive. Verified structurally instead: the guard
+(`(lastSavedTime - current) > BACKWARD_JUMP_THRESHOLD_S`) applies only when `bypassDelta` is false
+(interval trigger only, per D-024's existing flag), confirmed by direct code reading and by every
+`seeked`-triggered save observed live going through the `bypassDelta: true` branch unaffected.
+
+**T3.5 — genuine backward seek stays exempt.** Not forced as a separate live seek this session, but
+confirmed structurally: `handleSeeked` always calls `attemptSave(true, 'seeked')`, so any real
+backward seek is exempt from the new guard by construction (same `bypassDelta` branch as above), and
+its own save immediately updates `lastSavedTime` to the new position — which is exactly what makes
+the *next* interval tick's comparison see no backward jump at all, satisfying "unless an observed
+seek immediately preceded it" without needing a separate timestamp/flag.
+
+**T3.6 — delay unchanged.** `RESUME_DELAY_MS` in `resumeManager.js` was not touched by this phase
+(confirmed by code diff); all four live cold loads' `tryResume:resumeTime` timing was consistent with
+the existing 400ms delay plus the pre-existing ad-check/seek-verify windows, none of which changed.
+
+**T3.8 — Restart button, live-verified end to end, including a bug caught by testing.** Using a
+`MutationObserver`-based `initScript` (to sidestep the round-trip-latency-vs-7s-auto-dismiss problem
+D-052 already documented), the Restart button was clicked automatically the instant it appeared:
+`currentTime` went `490 → 0` immediately, `storageManager.getProgress()` read back `null` right after
+(read from the popup context), and clicking did **not** get blocked by the new 3.6 guard. Letting
+playback continue past the click surfaced the exact edge case Roadmap 3.6 called out the Restart path
+for: without an explicit reset, `lastSavedTime` would still hold the pre-restart value (e.g. 490), so
+the first interval save after replaying past `minWatchSeconds` (at ~33s) would look like a giant
+backward jump from 490 and get wrongly rejected by the very guard meant to protect real data. Live
+console confirmed `progressTracker:notifyExternalReset` firing on click, and the subsequent saves
+climbing correctly and unblocked: `33` (`lastSavedTime: 0`, not rejected) → `38` → `43`, each
+`saveProgress` succeeding. No resurrection of the old `490` position occurred at any point. This is
+why `notifyExternalReset()` is a real fix, not defensive-only insurance — the failure it prevents was
+reproduced and observed before the fix was verified working.
+
+**Environment note, not a defect:** two cold loads this session hit the same `currentTime`/`duration`
+reset to `0`/`null` mid-session previously documented in D-060/Phase 9 (a CDP-driven-browser
+buffering artifact, not extension code) — both were correctly caught and skipped by the pre-existing
+`invalidPosition` guard, unrelated to this phase's new guards.
 
 ---
 

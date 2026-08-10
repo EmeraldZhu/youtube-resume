@@ -44,7 +44,13 @@
         return;
       }
 
-      // 4. Try Resume
+      // 4. Start Progress Tracking — disarmed (Roadmap 3.1). Event listeners
+      // are live during the resume attempt below, but attemptSave() rejects
+      // every write until arm() is called, so a resume-in-progress seek can
+      // never be mistaken for a trackable position.
+      progressTracker.start(video, videoId, settings);
+
+      // 5. Try Resume
       try {
         const saved = await storageManager.getProgress(videoId);
         if (saved) {
@@ -53,11 +59,12 @@
       } catch(err) {
         // Log but do not crash — resume failure shouldn't kill tracking
         console.warn('[YTResume] Resume pipeline failed:', err.message);
+      } finally {
+        // Roadmap 3.2 — arms once the resume lifecycle has resolved: either
+        // tryResume() completed (success or verified give-up), or there was
+        // no saved entry to resume in the first place.
+        progressTracker.arm();
       }
-
-      // 5. Start Progress Tracking
-      // This is called whether resume succeeded, failed, or didn't occur
-      progressTracker.start(video, videoId, settings);
 
     } catch(err) {
       console.warn('[YTResume] Player initialization failed:', err.message);

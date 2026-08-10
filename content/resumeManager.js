@@ -17,6 +17,7 @@ const resumeManager = (() => {
   const SEEK_VERIFY_DELAY_MS = 250; // D-022
   const SEEK_TOLERANCE_S = 3; // D-022
   const SEEK_MAX_ATTEMPTS = 3; // D-022
+  const NATIVE_OVERRIDE_CHECK_DELAY_MS = 500; // Tier 2 pick — Roadmap 3.4
 
   /**
    * Returns a Promise that resolves when video.duration is a
@@ -97,6 +98,27 @@ const resumeManager = (() => {
       }
     }
     return false;
+  }
+
+  /**
+   * After a verified seek, waits briefly and checks whether YouTube's own
+   * native "continue watching" restore moved currentTime again. If so,
+   * re-asserts the resume position exactly once. A second override is
+   * accepted silently — no further check, no unbounded loop (Roadmap 3.4).
+   */
+  async function reassertIfNativeOverride(video, resumeTime) {
+    await delay(NATIVE_OVERRIDE_CHECK_DELAY_MS);
+    const drift = Math.abs(video.currentTime - resumeTime);
+    debugLogger.log('tryResume:nativeOverrideCheck', { currentTime: video.currentTime, resumeTime, drift });
+    if (drift <= SEEK_TOLERANCE_S) return; // no override observed
+
+    try {
+      video.currentTime = resumeTime;
+      debugLogger.log('tryResume:nativeOverrideReasserted', { resumeTime });
+    } catch (err) {
+      console.warn('[YTResume] Re-assert seek failed:', err.message);
+      debugLogger.log('tryResume:nativeOverrideReassertFailed', { error: err.message });
+    }
   }
 
   /**
@@ -244,6 +266,10 @@ const resumeManager = (() => {
       debugLogger.log('tryResume:seekUnverified', { currentTime: video.currentTime });
       return;
     }
+
+    // Roadmap 3.4 — YouTube's own native resume can override our verified
+    // seek shortly after; re-assert once against it before showing UI.
+    await reassertIfNativeOverride(video, resumeTime);
 
     // T7.7/T7.8/T7.9: the seek itself is unconditional — only the UI is
     // settings-gated. Off means zero injected DOM, not "resume disabled".

@@ -488,13 +488,15 @@ const DRIFT_TOLERANCE_S = 10;       // D-021
 const SEEK_VERIFY_DELAY_MS = 250;   // D-022
 const SEEK_TOLERANCE_S = 3;         // D-022
 const SEEK_MAX_ATTEMPTS = 3;        // D-022
+const NATIVE_OVERRIDE_CHECK_DELAY_MS = 500; // Tier 2 pick — D-090, Roadmap 3.4
 ```
 
 #### Detailed Logic
 
-Rewritten Phase 2 (D-019 through D-022, D-038); Phase 3 added the minimum-watched short-circuit
+Rewritten Phase 2 (D-019 through D-022, D-038); v2 Phase 3 added the minimum-watched short-circuit
 below; Phase 7 threaded `settings` through the threshold calls and gated the UI calls at the end
-(Roadmap 7.1, 7.4, D-049).
+(Roadmap 7.1, 7.4, D-049). v3 Phase 3 (D-066) added the arm/disarm gate this function's completion
+now drives (see §4.5) and the native-override re-assert below (D-090).
 
 ```javascript
 async function tryResume(video, saved, videoId, settings = {}) {
@@ -563,12 +565,31 @@ async function tryResume(video, saved, videoId, settings = {}) {
     return;
   }
 
+  // v3 Phase 3 (D-066/3.4): re-assert once against YouTube's own native
+  // "continue watching" restore overriding our verified seek.
+  await reassertIfNativeOverride(video, resumeTime);
+
   // Phase 7 (Roadmap 7.4): the seek itself is unconditional — only the UI is
   // settings-gated. Both off means the resume still happens, silently.
   if (showRestartButton) uiInjector.showRestartButton(video, videoId);
   if (showToast) uiInjector.showToast(resumeTime);
 }
 ```
+
+**`reassertIfNativeOverride(video, resumeTime)`:** *(new v3 Phase 3, D-090)*
+```javascript
+// Waits NATIVE_OVERRIDE_CHECK_DELAY_MS, re-reads currentTime. If it drifted
+// past SEEK_TOLERANCE_S from resumeTime, re-assigns currentTime once. A
+// second override afterward is accepted silently — no further check, no
+// unbounded loop (Roadmap 3.4).
+```
+
+**Arm/disarm handoff (v3 Phase 3, D-066):** `bootstrap.js` calls `progressTracker.start()`
+(disarmed) *before* this function runs, so its event listeners are live during the resume attempt
+but every write is rejected until armed. Once `tryResume()`'s promise settles — success, verified
+give-up, or no saved entry to attempt in the first place — `bootstrap.js` calls
+`progressTracker.arm()` in a `finally` block. This is a lifecycle gate, not a new delay: it adds no
+timer of its own, only sequencing around the existing 400ms delay and seek-verification retry (§4.5).
 
 **`waitForMetadata(video)`:**
 ```javascript
@@ -607,6 +628,8 @@ async function tryResume(video, saved, videoId, settings = {}) {
 progressTracker.start(video: HTMLVideoElement, videoId: string, settings: Settings): void
 progressTracker.stop(): void
 progressTracker.tick(): void
+progressTracker.arm(): void                 // v3 Phase 3, D-066
+progressTracker.notifyExternalReset(): void  // v3 Phase 3, D-066
 ```
 
 `tick()`, added Phase 9 (D-059), is called once per 1000ms by `navigationManager`'s existing poll
@@ -622,6 +645,8 @@ let lastSavedTime: number = 0;
 let activeVideo: HTMLVideoElement | null = null;
 let activeVideoId: string | null = null;
 let minWatchSeconds: number = 30;   // Phase 7 — captured once in start(), never re-read
+let armed: boolean = false;         // v3 Phase 3 (D-066) — see Detailed Logic below
+const BACKWARD_JUMP_THRESHOLD_S = 30; // Tier 2 pick — v3 Phase 3, D-090
 ```
 
 #### Detailed Logic
@@ -637,6 +662,8 @@ function start(video, videoId, settings = {}) {
   minWatchSeconds = settings.minWatchSeconds ?? 30;
   lastSavedTime = video.currentTime;
   ticksSinceSave = 0;
+  armed = false; // v3 Phase 3 (D-066) — disarmed on every load; bootstrap.js
+                 // calls arm() once the resume lifecycle resolves (§4.4)
 
   // No setInterval here (D-059) — tick() is called externally, once per
   // 1000ms, by navigationManager's existing poll interval via bootstrap.js.
@@ -670,6 +697,7 @@ function tick() {
 ```javascript
 function attemptSave(bypassDelta, trigger) {
   if (!activeVideo || !activeVideoId) return;
+  if (!armed) return; // v3 Phase 3 (D-066) — no write until the resume lifecycle resolves
   if (playerObserver.isAdPlaying()) return;
   if (activeVideo.duration === Infinity) return; // live stream guard
 
@@ -681,6 +709,16 @@ function attemptSave(bypassDelta, trigger) {
   // Phase 7 (Roadmap 7.5): no storage entry for a video watched less than
   // minWatchSeconds — same position-based check resumeManager uses.
   if (!timeUtils.meetsMinimumWatched(current, minWatchSeconds)) return;
+
+  // v3 Phase 3 (D-066/3.6, D-090): interval-only regression guard — a large
+  // backward jump from the last known-good position is treated as a
+  // spurious read (defect C's mechanism), not a real seek, and rejected.
+  // Every event trigger (seeked/pause/ended/visibility/pagehide) is exempt
+  // by construction: bypassDelta is true for all of them, and a genuine
+  // backward seek's own event-triggered save already moved lastSavedTime to
+  // the new position before the next interval tick runs, so no separate
+  // "recent seek" flag is needed to cover that case.
+  if (!bypassDelta && (lastSavedTime - current) > BACKWARD_JUMP_THRESHOLD_S) return;
 
   if (!bypassDelta && Math.abs(current - lastSavedTime) < 5) return; // delta guard — interval only
 
@@ -709,11 +747,23 @@ function attemptSave(bypassDelta, trigger) {
 > `true` because each represents meaningful user intent or a definite end-of-session boundary, not
 > a periodic check.
 
+**`arm()`:** *(new v3 Phase 3, D-066)* — called once by `bootstrap.js` after `resumeManager.tryResume()`
+settles (or immediately if there was no saved entry). Sets `armed = true`; no other side effects.
+
+**`notifyExternalReset()`:** *(new v3 Phase 3, D-090)* — called by `uiInjector.js`'s Restart button
+click handler immediately after it forces `video.currentTime = 0`. Resets `lastSavedTime = 0` so
+replaying past `minWatchSeconds` afterward isn't mistaken by the backward-jump guard above for a
+spurious overwrite of the pre-restart position — an explicit exemption for this specific path (Roadmap
+3.6), not a reliance on whatever native `seeked` behavior a programmatic assignment does or doesn't
+trigger. Live-verified: without this call, replaying a restarted video past 30s reproduced exactly the
+false-positive rejection it exists to prevent.
+
 **`stop()`:**
 
 ```javascript
 function stop() {
   ticksSinceSave = 0;
+  armed = false;
 
   if (activeVideo) {
     activeVideo.removeEventListener('pause',  handlePause);
