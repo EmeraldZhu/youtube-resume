@@ -14,7 +14,7 @@
 | 2 | Storage Integrity | AWAITING VERIFICATION | — |
 | 3 | Resume Gate & Write Protection | AWAITING VERIFICATION | — |
 | 4 | Pinning Data Layer | DONE | — |
-| 5 | Pinning UI | AWAITING VERIFICATION | — |
+| 5 | Pinning UI | DONE | — |
 | 6 | Doc Reconciliation, Regression & Store Release | NOT STARTED | — |
 | — | `docs/ROADMAP_v3.md` (latest revision: task 0.0 rewritten headless-first (owner pastes one storage export), 0.0-vs-T0.8 evidence-precedence table, T0.6 baseline fix) | AWAITING VERIFICATION | — |
 | — | `docs/PRD_YouTube_Resume.md` bumped to 3.0.0 (§5.10 defect guarantees, §5.11 pinning, G12/G13, §6.1/§6.3 debugLogger fix, NG8 pinning exception) | AWAITING VERIFICATION | — |
