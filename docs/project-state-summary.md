@@ -10,7 +10,7 @@
 | Phase | Name | Status | Blocked By |
 |---|---|---|---|
 | 0 | Defect Diagnosis & Instrumentation | AWAITING VERIFICATION | — |
-| 1 | Identity Hardening | AWAITING VERIFICATION | — |
+| 1 | Identity Hardening | DONE | — |
 | 2 | Storage Integrity | NOT STARTED | — |
 | 3 | Resume Gate & Write Protection | NOT STARTED | — |
 | 4 | Pinning Data Layer | NOT STARTED | — |
@@ -49,14 +49,13 @@ in-player UI (Phase 5), single-`setInterval` fix (D-059). Full history in `docs/
 
 ## Next action
 
-Phase 0 and Phase 1 executed, both AWAITING VERIFICATION — owner review needed (see ROADMAP_v3.md
-"Phase 0 Findings" and Phase 1's task/test list). Phase 1 confirmed the identity invariant already
-held everywhere (no bug found, matching D-064); it added a structural guard (code comment + doc
-sections) so it can't regress. Phase 2's non-destructive migration-chain work proceeds next, but
-D-070's legacy-key-deletion exception now has no confirmed target and will not fire; Phase 3 is
-squarely justified — defect C is confirmed. **Drift fixed:** TDD §4.6/§7.3 now cover the identity
-invariant; TDD still otherwise reads 2.0.0 and doesn't yet cover defects B/C, pinning, or the rest of
-`debugLogger.js` — continue closing this through Phase 2+.
+Phase 0 AWAITING VERIFICATION (owner review needed — see ROADMAP_v3.md "Phase 0 Findings"). **Phase 1
+DONE** (owner-confirmed) — identity invariant already held everywhere (no bug found, matching D-064);
+added a structural guard (code comment + doc sections) so it can't regress. Phase 2's non-destructive
+migration-chain work proceeds next, but D-070's legacy-key-deletion exception now has no confirmed
+target and will not fire; Phase 3 is squarely justified — defect C is confirmed. **Drift fixed:** TDD
+§4.6/§7.3 now cover the identity invariant; TDD still otherwise reads 2.0.0 and doesn't yet cover
+defects B/C, pinning, or the rest of `debugLogger.js` — continue closing this through Phase 2+.
 
 ## Doc versions
 
