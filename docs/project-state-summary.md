@@ -13,7 +13,7 @@
 | 1 | Identity Hardening | DONE | — |
 | 2 | Storage Integrity | AWAITING VERIFICATION | — |
 | 3 | Resume Gate & Write Protection | AWAITING VERIFICATION | — |
-| 4 | Pinning Data Layer | AWAITING VERIFICATION | — |
+| 4 | Pinning Data Layer | DONE | — |
 | 5 | Pinning UI | NOT STARTED | — |
 | 6 | Doc Reconciliation, Regression & Store Release | NOT STARTED | — |
 | — | `docs/ROADMAP_v3.md` (latest revision: task 0.0 rewritten headless-first (owner pastes one storage export), 0.0-vs-T0.8 evidence-precedence table, T0.6 baseline fix) | AWAITING VERIFICATION | — |
