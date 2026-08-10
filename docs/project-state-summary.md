@@ -15,7 +15,7 @@
 | 3 | Resume Gate & Write Protection | AWAITING VERIFICATION | — |
 | 4 | Pinning Data Layer | DONE | — |
 | 5 | Pinning UI | DONE | — |
-| 6 | Doc Reconciliation, Regression & Store Release | AWAITING VERIFICATION | — |
+| 6 | Doc Reconciliation, Regression & Store Release | DONE | — |
 
 `manifest.json` now reads **3.0.0**; permissions/`host_permissions` byte-identical to v2.0.0; only
 network request is the gated `i.ytimg.com` thumbnail GET; debugLogger audit clean. Full copy audit
@@ -27,10 +27,13 @@ real `storageManager.js` (D-093's technique). T6.7 (zip build) passes clean via 
 Live spot-check on a real YouTube watch page shows no `[YTResume]` errors under the new build.
 T6.3/T6.4 (full regression, defects A/B/C) lean on Phase 0–3's already-recorded live verification
 this session, since Phase 6 touched no resume/tracking code. Live `chrome.storage.local` writes were
-auto-denied by the session's safety classifier, so T6.5's 20-cold-load live half wasn't run — the
-harness plus the unchanged-code argument stand in. PRD/UX Spec/TDD reconciliation (6.6) complete:
-TDD bumped 2.0.0→3.0.0 (new `debugLogger.js` module spec, arm/disarm + pinning diagrams, ~15 new §11
-test rows); PRD/UX Spec content gaps closed (migration write-up, v3 module notes, CP-64 rationale).
+auto-denied by the session's safety classifier at the time; the harness plus the unchanged-code
+argument stood in for T6.5's 20-cold-load live half. Owner subsequently added
+`mcp__chrome-devtools__evaluate_script` to `.claude/settings.local.json`'s allow list — a probe write
+confirmed the block is lifted, but the live cold-load rerun itself was not requested and was not run
+(see D-098). PRD/UX Spec/TDD reconciliation (6.6) complete: TDD bumped 2.0.0→3.0.0 (new
+`debugLogger.js` module spec, arm/disarm + pinning diagrams, ~15 new §11 test rows); PRD/UX Spec
+content gaps closed (migration write-up, v3 module notes, CP-64 rationale). **Owner-confirmed DONE.**
 
 ## Phase Status — v2.0.0 (shipped)
 
@@ -52,10 +55,10 @@ in-player UI (Phase 5), single-`setInterval` fix (D-059). Full history in `docs/
 
 ## Next action
 
-All seven v3.0.0 phases (0–6) are built and self-verified; none are owner-confirmed `DONE` except
-Phase 1, 4, and 5. Owner review needed for: Phase 0's visual-facing implications, and Phase 6's release
-readiness (manifest 3.0.0, zip load, copy). Nothing is blocking — see `docs/DECISIONS.md` "Currently
-blocking" for the one open, non-blocking item (D-034).
+All seven v3.0.0 phases (0–6) are built and self-verified; Phases 1, 4, 5, and 6 are owner-confirmed
+`DONE`. Phases 0, 2, and 3 remain `AWAITING VERIFICATION` — owner review still needed for Phase 0's
+visual-facing implications. Nothing is blocking — see `docs/DECISIONS.md` "Currently blocking" for the
+one open, non-blocking item (D-034).
 
 ## Doc versions
 
