@@ -791,6 +791,20 @@ const CURRENT_SCHEMA_VERSION = 2;                // v2
 `youtubeResume` — that object's keys are counted for the `MAX_ENTRIES` eviction cap, so a stray
 non-videoId key would corrupt both counting and eviction (D-013).
 
+**Identity invariant (Roadmap v3 Phase 1, D-086):** `videoId` is structurally the sole identity for
+a stored entry — the only value ever used as a `youtubeResume` key or in an entry-equality check
+anywhere in the codebase. `title` and `channel` are refreshed, display-only metadata on the entry
+(`saveProgress`'s preserve-if-omitted fields, D-016/D-045); they are never read for lookup,
+comparison, or key derivation by `storageManager`, `navigationManager` (video-change detection,
+`checkAndEmit()`, compares `videoId` only), `resumeManager`, `progressTracker`, or `bootstrap.js`.
+`popup.js` reads `title`/`channel` only to render row text — never to key or compare entries. A
+repo-wide grep for title/channel-based equality or key construction (Roadmap v3 T1.2) returns zero
+matches. Confirmed by direct testing: two different `videoId`s sharing an identical title produce two
+distinct entries; the same `videoId` saved twice with different title signals produces one entry,
+with the second save's title winning for display (Roadmap v3 T1.3/T1.4). This closes the failure
+class Phase 0 investigated for defect A/B(secondary) even though neither reproduced against shipped
+code — see Roadmap v3 Phase 0 Findings.
+
 #### Detailed Logic
 
 **D-048:** every public function below begins with `assertStorageAvailable()`, a guard that throws
@@ -846,6 +860,9 @@ async function saveProgress(videoId, time, duration, title, channel) {
     entry.channel = resolvedChannel;
   }
 
+  // Identity invariant (Roadmap v3 Phase 1): videoId is the sole identity
+  // for a stored entry. title/channel above are refreshed display-only
+  // metadata on that entry — never fall back into this key.
   store[videoId] = entry;
 
   // Eviction: trim to MAX_ENTRIES before writing

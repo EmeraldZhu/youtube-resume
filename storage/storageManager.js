@@ -143,6 +143,11 @@ const storageManager = (() => {
       entry.channel = resolvedChannel;
     }
 
+    // Identity invariant (Roadmap v3 Phase 1 / TDD §4.6): videoId is the
+    // sole identity for a stored entry. title/channel above are refreshed
+    // display-only metadata on that entry — never fall back into this key,
+    // never participate in an equality check, never get hashed/concatenated
+    // into it. Do not reintroduce them into the key path here.
     store[videoId] = entry;
 
     // Eviction: trim to MAX_ENTRIES before writing
@@ -154,6 +159,14 @@ const storageManager = (() => {
     }
 
     await chrome.storage.local.set({ [STORAGE_KEY]: store });
+
+    // Phase 0 (v3) diagnostic — defects A/B (Roadmap v3 0.2). No-ops when DEBUG is false.
+    debugLogger.log('saveProgress', {
+      videoId,
+      existingEntryFound: !!existing,
+      incomingTitle: title ?? null,
+      entryCountAfterWrite: Object.keys(store).length,
+    });
   }
 
   /**

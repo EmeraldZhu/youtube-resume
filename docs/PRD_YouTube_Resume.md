@@ -7,12 +7,12 @@
 |---|---|
 | **Product Name** | YouTube Resume |
 | **Product Type** | Chrome Extension (Manifest V3) |
-| **Version** | 2.0.0 |
-| **Previous Version** | 1.0.0 (live on Chrome Web Store) |
+| **Version** | 3.0.0 |
+| **Previous Version** | 2.0.0 (live on Chrome Web Store) |
 | **Status** | Approved — Ready for Engineering |
-| **Last Updated** | 2026-07-26 |
+| **Last Updated** | 2026-08-10 |
 | **Owner** | Product |
-| **Companion Documents** | ROADMAP_v2.md, TDD_YouTube_Resume.md, UX_Spec_YouTube_Resume.md v2.0.0 |
+| **Companion Documents** | ROADMAP_v3.md, TDD_YouTube_Resume.md, UX_Spec_YouTube_Resume.md, DECISIONS.md |
 
 ---
 
@@ -29,6 +29,17 @@
 | C7 | Non-goal NG4 (no settings page) removed | §3.2 |
 | C8 | "Resume history page" removed from the roadmap — delivered in this release | §13 |
 | C9 | §6.1 project structure corrected to match shipped code | §6.1 |
+
+## Changelog — v2.0.0 → v3.0.0
+
+| # | Change | Section |
+|---|---|---|
+| C10 | Three defects reported against v2.0.0 addressed as explicit product guarantees: title-change resume breakage, runaway "Untitled video" duplication, and near-zero timestamp overwrites | §5.10 (new) |
+| C11 | Data-durability guarantee stated explicitly as a product promise, not just an implementation detail | §5.10, G13 |
+| C12 | Pinned videos introduced — users can protect specific saved videos from the 200-entry eviction cap | §5.11 (new), G12 |
+| C13 | Storage schema advances to v3 (adds optional `pinned`) | §7.3, §7.5 |
+| C14 | §6.1 project structure and §6.3 manifest snippet corrected to include `utils/debugLogger.js`, which has shipped since v2.0.0 but was omitted from both | §6.1, §6.3 |
+| C15 | Non-Goals reaffirmed for v3.0 — no change to which items are in or out of scope; settings page (removed as a non-goal in v2.0) remains in scope | §3.2 |
 
 ---
 
@@ -58,6 +69,8 @@ YouTube Resume is a lightweight Chrome extension that silently tracks a user's p
 The product philosophy is **invisible until needed, reliable always**.
 
 v2.0.0 is a reliability and control release. v1.0 established the mechanism; v2.0 makes it dependable, makes its two in-player surfaces match YouTube's current design language, and gives the user two things they asked for: a way to see what has been saved, and a way to adjust the thresholds that were previously hard-coded.
+
+v3.0.0 is a trust and curation release. It resolves three defects reported against v2.0.0 that undermined the core promise — resume breaking on a title change, storage filling with untitled duplicate entries, and a saved position occasionally being silently overwritten with a near-zero value — and adds pinning, so a user with a long saved-videos list can guarantee specific entries survive the 200-entry cap indefinitely.
 
 ---
 
@@ -109,10 +122,12 @@ A persistent, local, session-agnostic resume mechanism closes this gap entirely.
 | **G9** | **Injected in-player UI must be visually indistinguishable from YouTube's own controls** | **v2.0** |
 | **G10** | **Give users optional control over the thresholds that govern resume behaviour** | **v2.0** |
 | **G11** | **Give users a way to see, open, and manage their saved videos** | **v2.0** |
+| **G12** | **Let users protect specific saved videos from the 200-entry eviction cap by pinning them** | **v3.0** |
+| **G13** | **Guarantee that a saved position is never replaced by a near-zero position the user did not cause** | **v3.0** |
 
 > **G3 and G10 are not in conflict.** Defaults must remain correct for a user who never opens settings. Settings are an escape hatch, not a setup step.
 
-### 3.2 Non-Goals (v2.0)
+### 3.2 Non-Goals (v3.0)
 
 | # | Non-Goal | Rationale |
 |---|---|---|
@@ -124,7 +139,14 @@ A persistent, local, session-agnostic resume mechanism closes this gap entirely.
 | **NG7** | **Live propagation of settings changes into already-open YouTube tabs** | Settings apply on next navigation; live push adds messaging complexity for negligible benefit |
 | **NG8** | **Editing or renaming saved entries** | The panel is for viewing, opening, and removing — not curation |
 
-> **NG4 (no settings page) is removed in v2.0.** A settings surface is now in scope, delivered as a panel inside the popup rather than a separate options page. See §5.8.
+> **NG8 has one bounded exception: pinning (§5.11).** Pinning is curation in that it changes retention
+> (exempt from the 200-entry cap) and ordering (sorts to top) — but it never edits or renames an
+> entry's content (title, channel, thumbnail, saved position). NG8's prohibition targets content
+> edits specifically; pinning doesn't reopen it.
+
+> **NG4 (no settings page) is removed in v2.0 and stays removed in v3.0.** A settings surface shipped as a panel inside the popup rather than a separate options page, and remains in scope — it is not a non-goal being reconsidered. See §5.8.
+>
+> **Unchanged for v3.0:** cross-device sync (NG1), resume for Shorts/live/embed (NG2), analytics or telemetry (NG5), and Firefox/Safari support (NG6) all remain non-goals. Pinning (§5.11) does not reopen any of these — it is additive to the existing local-storage model.
 
 ---
 
@@ -180,6 +202,11 @@ A persistent, local, session-agnostic resume mechanism closes this gap entirely.
 **Given** a user finds the 30-second minimum too long for their viewing habits
 **When** they open settings and set it to 10 seconds
 **Then** videos watched for more than 10 seconds are saved and resumed from that point on
+
+#### UC-9: Protecting a Video from Eviction *(new in v3.0)*
+**Given** a user has a saved video they want to keep indefinitely, even as their 200-entry list fills with newer videos
+**When** they pin it from the saved videos panel
+**Then** it sorts to the top of the list and is never removed by the 200-entry cap, regardless of how many other videos are saved afterward
 
 ---
 
@@ -407,11 +434,45 @@ Clicking the extension icon opens a panel listing saved videos, newest first.
 
 ---
 
+### 5.10 Defect Resolution *(new in v3.0)*
+
+Three defects were reported against v2.0.0. This section states the user-visible symptom and the
+guaranteed post-fix behaviour for each, as product requirements. **The mechanism behind each fix is
+still under investigation as of this PRD revision** (ROADMAP_v3.md Phase 0) and is intentionally not
+described here — mechanism is the roadmap's and the TDD's responsibility, not the PRD's.
+
+| Defect | Symptom (as reported) | Guaranteed behaviour after the fix |
+|---|---|---|
+| **D-A** | Resume stopped working for a video after its title changed (e.g. the creator edited the title after upload) | A video's saved position and resume behaviour depend **only** on its YouTube video ID. A title change — by the creator, by YouTube, or by any other means — must never affect whether or where that video resumes. |
+| **D-B** | Storage filled with 200 entries all labeled "Untitled video," crowding out real saved videos | Each video the user actually watches occupies **at most one** entry, regardless of whether its title was available to capture at the moment of saving. A title being unavailable must never cause a duplicate entry, and must never by itself consume eviction capacity that a real, distinct video would otherwise use. |
+| **D-C** | Resume intermittently failed, and inspecting the saved data showed the position had been overwritten to nearly zero | See the data-durability guarantee below. |
+
+**Data-durability guarantee (product promise):** A saved playback position is never replaced by a
+near-zero position that the user did not cause. If the user genuinely seeks or restarts a video to
+its beginning, that is saved normally. A saved position must never be silently overwritten by a
+near-zero value arising from any other condition — a bug, a timing issue, an unrelated page event, or
+anything else. This is G13 and holds regardless of which specific mechanism Phase 0 finds responsible
+for defect D-C.
+
+### 5.11 Pinned Videos *(new in v3.0)*
+
+Users can pin a saved video from the saved videos panel (§5.9) to protect it from automatic removal.
+
+**Requirements:**
+- Any saved video can be pinned or unpinned from the panel
+- Pinned videos always sort above unpinned videos in the panel, regardless of when they were last watched
+- Pinned videos are **never** evicted by the 200-entry cap (§7.5) — the cap applies to unpinned videos only
+- A maximum of **20** videos may be pinned at once. Attempting to pin a 21st is refused; no existing pin is ever removed automatically to make room
+- **"Clear saved progress" in settings removes pinned videos too.** Pinning protects against the automatic 200-entry cap; it is not an exemption from an explicit, user-initiated deletion of all saved data
+- Pinning requires no new permission and issues no network request
+
+---
+
 ## 6. Technical Architecture
 
 ### 6.1 Project Structure
 
-> Corrected in v2.0 to match shipped code. The v1.0 PRD listed a superseded layout (`youtube.js`, `storage.js`) that was never built.
+> Corrected in v2.0 to match shipped code. The v1.0 PRD listed a superseded layout (`youtube.js`, `storage.js`) that was never built. **Corrected again in v3.0:** `utils/debugLogger.js` had shipped since v2.0.0 (Phase 1 instrumentation) but was missing from this tree and from §6.3's manifest snippet.
 
 ```
 youtube-resume/
@@ -430,6 +491,7 @@ youtube-resume/
 │   └── storageManager.js       # chrome.storage.local abstraction, settings, migration
 │
 ├── utils/
+│   ├── debugLogger.js          # Gated debug logging ([YTResume]-prefixed); no-ops when DEBUG is false
 │   ├── youtubeUtils.js         # URL parsing, videoId extraction, title/channel capture
 │   └── timeUtils.js            # Threshold math, resume calculations, formatting
 │
@@ -458,6 +520,7 @@ youtube-resume/
 | `progressTracker.js` | Owns the single `setInterval` and all playback event listeners. Captures the video title and channel name on save. |
 | `storageManager.js` | The **only** module that touches `chrome.storage.local`. Owns watch data, settings, eviction, and schema migration. |
 | `uiInjector.js` | Injects and tears down the Restart button and resume toast. `document.createElement` only. |
+| `debugLogger.js` | Gated debug logging, `[YTResume]`-prefixed. No-ops when `DEBUG` is `false`; no other module makes ad hoc `console.log` calls. |
 | `youtubeUtils.js` | Pure URL and page-type inspection, plus video title and channel name extraction |
 | `timeUtils.js` | Pure threshold math and timestamp formatting |
 | `popup/*` | Saved videos list and settings panel. Reads through `storageManager` semantics; no direct DOM injection into YouTube. |
@@ -468,7 +531,7 @@ youtube-resume/
 {
   "manifest_version": 3,
   "name": "YouTube Resume",
-  "version": "2.0.0",
+  "version": "3.0.0",
   "description": "Automatically resume YouTube videos exactly where you left off.",
   "permissions": ["storage"],
   "host_permissions": ["https://www.youtube.com/*"],
@@ -480,6 +543,7 @@ youtube-resume/
       "matches": ["https://www.youtube.com/*"],
       "js": [
         "storage/storageManager.js",
+        "utils/debugLogger.js",
         "utils/youtubeUtils.js",
         "utils/timeUtils.js",
         "content/playerObserver.js",
@@ -534,6 +598,7 @@ type VideoProgress = {
   updated: number;    // Unix timestamp (seconds) of last save
   title?: string;     // v2.0 — video title, max 200 chars, optional
   channel?: string;   // v2.0 (post-Phase-8 polish) — channel/uploader name, max 200 chars, optional
+  pinned?: boolean;   // v3.0 — user-set; absent/false = unpinned; see §5.11
 };
 
 type Settings = {
@@ -545,6 +610,13 @@ type Settings = {
   loadThumbnails: boolean;       // default true
 };
 ```
+
+**Identity invariant (v3.0, Roadmap Phase 1):** the YouTube video ID is the sole, structurally
+enforced identity for a `youtubeResume` entry — the only value ever used as its storage key or in
+any equality/lookup check. `title` and `channel` are refreshed, display-only metadata: they are
+never read for lookup, comparison, or key derivation anywhere in the codebase, so a title change
+(e.g. a creator editing it after upload) can never create a duplicate entry or break resume for the
+same video.
 
 **Example stored value:**
 
@@ -592,6 +664,7 @@ type Settings = {
 - Strategy: sort by `updated` ascending, remove oldest until count ≤ 200
 - Eviction must never remove the entry just written
 - Eviction counts only entries inside `youtubeResume`; other root keys are out of scope
+- **v3.0:** pinned entries (`pinned: true`, §5.11) are excluded entirely from the 200-entry count and from eviction candidacy — the cap of 200 applies to unpinned entries only. A separate hard cap of 20 pinned entries applies to pinning itself, enforced at pin time rather than by eviction.
 
 ### 7.6 Schema Migration — v1 → v2 *(new)*
 
@@ -794,6 +867,8 @@ Full phase-by-phase test tables are in ROADMAP_v2.md. This section defines the c
 | R13 | Privacy policy updated to disclose the thumbnail exception |
 | R14 | Manifest V3 compliance verified; version reads `2.0.0` |
 | R15 | All five project documents consistent with shipped code |
+| R16 | Defects D-A, D-B, and D-C (§5.10) no longer reproduce; a saved position is never replaced by a near-zero position the user did not cause (G13) |
+| R17 | At most 20 pinned videos exist at any time; pinned videos are never evicted by the 200-entry cap (G12) |
 
 ---
 
@@ -854,4 +929,4 @@ Out of scope for v2.0.
 
 ---
 
-*This document is the authoritative product specification for YouTube Resume v2.0.0. Implementation decisions trace back to requirements defined here. Deviations require product sign-off. For implementation detail, the TDD takes precedence; the PRD takes precedence on product intent and scope.*
+*This document is the authoritative product specification for YouTube Resume v3.0.0. Implementation decisions trace back to requirements defined here. Deviations require product sign-off. For implementation detail, the TDD takes precedence; the PRD takes precedence on product intent and scope.*

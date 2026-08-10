@@ -39,13 +39,21 @@ const progressTracker = (() => {
    *   unconditionally.
    */
   function attemptSave(bypassDelta, trigger) {
+    // Phase 0 (v3) diagnostic — logged on every call, before any guard can
+    // return early, per Roadmap v3 0.3 (videoId, trigger, position-to-write).
+    debugLogger.log('attemptSave:entry', {
+      videoId: activeVideoId,
+      trigger,
+      currentTime: activeVideo ? activeVideo.currentTime : null,
+    });
+
     if (!activeVideo || !activeVideoId) return;
     if (playerObserver.isAdPlaying()) {
-      debugLogger.log('attemptSave:skipped', { trigger, reason: 'adPlaying' });
+      debugLogger.log('attemptSave:skipped', { videoId: activeVideoId, trigger, reason: 'adPlaying' });
       return;
     }
     if (activeVideo.duration === Infinity) {
-      debugLogger.log('attemptSave:skipped', { trigger, reason: 'liveStream' });
+      debugLogger.log('attemptSave:skipped', { videoId: activeVideoId, trigger, reason: 'liveStream' });
       return; // live stream guard
     }
 
@@ -53,17 +61,18 @@ const progressTracker = (() => {
     const duration = Math.floor(activeVideo.duration);
 
     if (Number.isNaN(current) || current < 0 || Number.isNaN(duration) || current > duration) {
-      debugLogger.log('attemptSave:skipped', { trigger, reason: 'invalidPosition', current, duration });
+      debugLogger.log('attemptSave:skipped', { videoId: activeVideoId, trigger, reason: 'invalidPosition', current, duration });
       return; // invalid position guard
     }
 
     if (!timeUtils.meetsMinimumWatched(current, minWatchSeconds)) {
-      debugLogger.log('attemptSave:skipped', { trigger, reason: 'belowMinWatch', current, minWatchSeconds });
+      debugLogger.log('attemptSave:skipped', { videoId: activeVideoId, trigger, reason: 'belowMinWatch', current, minWatchSeconds });
       return; // Roadmap 7.5 — no storage entry for a video watched less than this
     }
 
     const deltaBlocked = !bypassDelta && Math.abs(current - lastSavedTime) < 5;
     debugLogger.log('attemptSave', {
+      videoId: activeVideoId,
       trigger,
       bypassDelta: !!bypassDelta,
       deltaBlocked,

@@ -1,11 +1,35 @@
 # Project State Summary — YouTube Resume
 
-**Target:** v2.0.0 · **Live:** v1.0.0 on the Chrome Web Store (real users, real saved data)
-**Plan:** `docs/ROADMAP_v2.md` · **Decisions:** `docs/DECISIONS.md`
+**Target:** v3.0.0 · **Live:** v2.0.0 on the Chrome Web Store (real users, real saved data)
+**Plan:** `docs/ROADMAP_v3.md` (v2 history: `docs/ROADMAP_v2.md`) · **Decisions:** `docs/DECISIONS.md`
 
 <!-- Keep this file under ~50 lines. It loads at the start of every session. -->
 
-## Phase Status — v2.0.0
+## Phase Status — v3.0.0
+
+| Phase | Name | Status | Blocked By |
+|---|---|---|---|
+| 0 | Defect Diagnosis & Instrumentation | AWAITING VERIFICATION | — |
+| 1 | Identity Hardening | AWAITING VERIFICATION | — |
+| 2 | Storage Integrity | NOT STARTED | — |
+| 3 | Resume Gate & Write Protection | NOT STARTED | — |
+| 4 | Pinning Data Layer | NOT STARTED | — |
+| 5 | Pinning UI | NOT STARTED | — |
+| 6 | Doc Reconciliation, Regression & Store Release | NOT STARTED | — |
+| — | `docs/ROADMAP_v3.md` (latest revision: task 0.0 rewritten headless-first (owner pastes one storage export), 0.0-vs-T0.8 evidence-precedence table, T0.6 baseline fix) | AWAITING VERIFICATION | — |
+| — | `docs/PRD_YouTube_Resume.md` bumped to 3.0.0 (§5.10 defect guarantees, §5.11 pinning, G12/G13, §6.1/§6.3 debugLogger fix, NG8 pinning exception) | AWAITING VERIFICATION | — |
+| — | `docs/UX_Spec_YouTube_Resume.md` bumped to 3.0.0 (pin control/badge, two-tier sort, limit-reached message, clear-all pinned disclosure, CP-62/63/65/66/67 — CP-64 removed, gap left open) | AWAITING VERIFICATION | — |
+
+Single release, no interim ship gate; Phases 0–3 are structurally independent of Phases 4–6 (see
+ROADMAP_v3.md §3). **Phase 0 is executed and AWAITING VERIFICATION** (D-085; full evidence in
+ROADMAP_v3.md's "Phase 0 Findings"): defect A not reproduced, defect B primary (legacy reimport)
+**refuted** — 0.0's live export of the owner's real profile found no legacy key, and no code path has
+ever existed to reimport one (outcome (b) of D-082's evidence table) — defect B secondary
+(title-identity) not reproduced, defect C **confirmed** (`saveProgress()` overwrites unconditionally,
+no guard). Schema v3 (`pinned` field) is introduced **only in Phase 4** (D-071). PRD §5.10 states
+defect fixes as symptom+guarantee only — mechanism stays with Phase 0/TDD.
+
+## Phase Status — v2.0.0 (shipped)
 
 | Phase | Name | Status | Blocked By |
 |---|---|---|---|
@@ -18,51 +42,22 @@
 **Status values:** NOT STARTED · IN PROGRESS · BLOCKED · AWAITING VERIFICATION · DONE.
 A phase is `DONE` only when the owner confirms it. Claude Code never writes `DONE` itself.
 
-## Phase 9 — what's done vs. outstanding
+## v2.0.0 summary (shipped, owner-verified)
 
-**Done:** instrumentation confirmed off (DEBUG=false, all logging gated); copy audited clean against
-UX Spec §7 (no drift); permissions/network audits clean (only `i.ytimg.com` thumbnail GET, gated on
-`loadThumbnails`); manifest bumped to `2.0.0`; Dev Checklist §6.2 arithmetic fixed (D-031); TDD
-brought to v2.0.0, reconciled against shipped code (D-030); PRD/UX Spec/Dev Checklist confirmed
-already current. Privacy policy and store listing **drafted** at
-`docs/PRIVACY_POLICY_DRAFT.md` / `docs/STORE_LISTING_DRAFT.md` — D-032/D-033 reviewed and closed by
-the owner. D-059: live-testing found two concurrent `setInterval`s (pre-existing since v1.0, not a v2
-regression) — **fixed**, not just documented: `progressTracker` no longer owns a timer, it clocks
-its 5s save cadence off `navigationManager`'s existing 1s poll via a new `tick()` method. Only one
-`setInterval` is alive anywhere in the extension now, matching CLAUDE.md's constraint literally.
-**Live-verified** post-fix: resume still seeks correctly (198 from a 200s save, drift 0), and the
-interval-trigger save fired ~30 times over 131s (≈1 per 4.4s, matching the 5s cadence) — confirmed
-via a temporary `DEBUG=true` flip, reverted before finishing (never committed true).
-
-**Live-tested and passing:** T9.2 (fresh install), T9.6 (10/10 cold-load resume), T9.8 (silent on
-Shorts/live/embed/playlist/homepage), T9.9 (disable mid-session), T9.10 (zip reload). Restart-button
-click-clears-storage-and-seeks-to-0 (D-061: resumed to 198s → click → seeked to ~0 → storage
-entry deleted, all in one run). T9.4 25-navigation stress (D-062: 25 synthetic SPA navigations,
-zero leaked UI elements, single-interval design holds).
-**Scoped down this session (D-060):** T9.3 (30-min soak) and T9.7 (20-rep SPA-nav resume) hit real
-`googlevideo.com` CDN 403s / playback resets in this sandbox's automated Chrome instance — an
-environment/network limitation, not an extension defect (no correlated `[YTResume]` errors). The
-underlying mechanisms they'd exercise were verified by substitute means instead (see D-060/D-062).
-**Owner-verified:** T9.1 (real v1.0.0 profile upgrade), the real-video 30-min soak (T9.3), and the
-real 20-rep SPA-nav resume sample (T9.7) — all confirmed passing by the owner, closing out the gaps
-this session's sandboxed browser couldn't reach.
-**Housekeeping:** synthetic test entries left by live-testing have been cleared from
-`chrome.storage.local` on the dev-loaded extension.
-
-## Shipped state (v1.0.0 → v2.0.0)
-
-All 13 v1.0 source files plus popup's second (settings) view, saved-videos panel, and settings
-store. Resume reliability hardened (ad gating, drift guard, verified seek, retry on metadata
-timeout — Phases 1–3, owner-verified). In-player UI re-calibrated against measured live DOM (Phase
-5, owner-verified). Settings store + panel + runtime wiring done and owner-verified (Phases
-6–7). Saved videos panel with thumbnails/duration/progress overlays, channel name, Ko-fi link (Phase
-8 + polish, owner-verified). Full decision history in `docs/DECISIONS.md`.
+Settings view, saved-videos panel, settings store, hardened resume (Phases 1–3), re-calibrated
+in-player UI (Phase 5), single-`setInterval` fix (D-059). Full history in `docs/DECISIONS.md`.
 
 ## Next action
 
-v2.0.0 is verified end to end and ready for the owner to submit to the Chrome Web Store. No
-outstanding Phase 9 items remain.
+Phase 0 and Phase 1 executed, both AWAITING VERIFICATION — owner review needed (see ROADMAP_v3.md
+"Phase 0 Findings" and Phase 1's task/test list). Phase 1 confirmed the identity invariant already
+held everywhere (no bug found, matching D-064); it added a structural guard (code comment + doc
+sections) so it can't regress. Phase 2's non-destructive migration-chain work proceeds next, but
+D-070's legacy-key-deletion exception now has no confirmed target and will not fire; Phase 3 is
+squarely justified — defect C is confirmed. **Drift fixed:** TDD §4.6/§7.3 now cover the identity
+invariant; TDD still otherwise reads 2.0.0 and doesn't yet cover defects B/C, pinning, or the rest of
+`debugLogger.js` — continue closing this through Phase 2+.
 
 ## Doc versions
 
-PRD 2.0.0 · UX Spec 2.0.0 · Roadmap 2.0.0 · **TDD 2.0.0** (reconciled Phase 9, D-030 closed).
+PRD **3.0.0** · UX Spec **3.0.0** · Roadmap v2 2.0.0 · Roadmap v3 (draft) · TDD 2.0.0 (stale for v3).

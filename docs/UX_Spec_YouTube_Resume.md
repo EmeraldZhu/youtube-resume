@@ -7,11 +7,11 @@
 |---|---|
 | **Product** | YouTube Resume |
 | **Document Type** | UI/UX Specification |
-| **Version** | 2.0.0 |
-| **Previous Version** | 1.0.0 |
+| **Version** | 3.0.0 |
+| **Previous Version** | 2.0.0 |
 | **Status** | Approved — Ready for Implementation |
-| **Last Updated** | 2026-07-26 |
-| **Companion Documents** | PRD_YouTube_Resume.md v2.0.0, ROADMAP_v2.md, TDD_YouTube_Resume.md |
+| **Last Updated** | 2026-08-10 |
+| **Companion Documents** | PRD_YouTube_Resume.md v3.0.0, ROADMAP_v3.md, TDD_YouTube_Resume.md |
 
 ---
 
@@ -26,6 +26,16 @@
 | C5 | Status row (`✓ Active on YouTube`) removed | §6 |
 | C6 | Copy IDs CP-30 through CP-58 added; CP-12 and CP-13 retired | §7 |
 | C7 | "No settings page" constraint rescoped to in-player UI only | §9.1 |
+
+## Changelog — v2.0.0 → v3.0.0
+
+| # | Change | Section |
+|---|---|---|
+| C8 | Pin control added to each row in the saved videos view; pinned rows sort first | §6.3 |
+| C9 | Pin-limit-reached refusal state specified (20-pin cap) | §6.3 |
+| C10 | Lazy title backfill documented for the saved videos view (reuses existing CP-37 fallback, no new copy) | §6.3 |
+| C11 | "Clear saved progress" confirmation specified to disclose that pinned videos are deleted too | §6.4 |
+| C12 | Copy IDs CP-62 through CP-67 added for pinning | §7.3 |
 
 ---
 
@@ -345,21 +355,25 @@ Lower-left of the video frame, **fully clear of the progress bar**.
 │  YouTube Resume        ☕        34 saved videos ⚙│ ← fixed header
 ├──────────────────────────────────────────────────┤
 │ ┌────────────┐                                   │
-│ │            │20:00  Building a UE5 game from  ✕ │
+│ │📌          │20:00  Building a UE5 game from 📌✕│ ← pinned row
 │ │   thumb    │       scratch — part 3             │
 │ │  144×81    │       Some Game Dev Channel         │
 │ │ ▓▓▓▓░░░░░░ │       4:05 / 20:00 · 20% watched   │
 │ └────────────┘                                   │
 ├──────────────────────────────────────────────────┤
 │ ┌────────────┐                                   │
-│ │            │58:22  Advanced TypeScript          │
-│ │   thumb    │       patterns                  ✕ │
+│ │            │58:22  Advanced TypeScript       📌✕│ ← unpinned row
+│ │   thumb    │       patterns                     │
 │ │ ▓▓▓▓▓▓▓▓▓░ │       Some Coding Channel           │
 │ └────────────┘       42:10 / 58:22 · 72% watched  │
 ├──────────────────────────────────────────────────┤
 │                     ⋮ scrolls                    │
 └──────────────────────────────────────────────────┘
 ```
+
+> The `📌` glyphs above stand in for the pin affordance in this ASCII mock only. Per §9.2/D-058
+> precedent (the Ko-fi icon), the shipped pin control and pinned-state badge are drawn as inline SVG,
+> never the pin emoji — no functional copy uses emoji.
 
 **Header, revised (post-Phase-8 polish):** an icon-only Ko-fi link (`☕`, drawn as an inline SVG — not the reserved ❤️ emoji) sits centered between the title and the count/gear, via a 3-column header grid. `aria-label` CP-61.
 
@@ -370,13 +384,42 @@ Lower-left of the video frame, **fully clear of the progress bar**.
 | Thumbnail | 144×81 (16:9), `https://i.ytimg.com/vi/{videoId}/mqdefault.jpg`, `loading="lazy"` |
 | Duration badge | Bottom-right of the thumbnail, `{duration}`, dark pill — plain text/CSS overlay, not baked into the image (D-054) |
 | Watched-progress line | Bottom edge of the thumbnail, fill proportional to `time / duration` — the at-a-glance YouTube-style indicator; the precise numbers stay in the meta line below, not duplicated |
+| **Pinned badge** *(v3.0)* | Top-left corner of the thumbnail, small filled pin glyph (inline SVG, not emoji) — rendered **only** when the entry is pinned. Passive indicator, not interactive; `aria-hidden="true"` on the glyph itself since the row's pin control (below) already carries an accessible name for the state |
 | Title | Two lines maximum, ellipsis overflow. Falls back to CP-37 |
 | Channel name | One line, ellipsis overflow, muted. Omitted entirely (no placeholder) when not yet captured |
 | Meta line | CP-34 and CP-35 — `{position} / {duration} · {percent}% watched` |
+| **Pin control** *(v3.0)* | Inline SVG icon button, positioned in the row's action area immediately to the left of the remove control (`📌 ✕` reading order). Revealed on row hover, like the remove control — but see the note below on the persistent pinned badge, which is what signals pinned state without hovering. Always keyboard-focusable. Outline glyph when unpinned; filled glyph when pinned. `aria-pressed="true"`/`"false"` reflects state; `aria-label` switches between CP-62 (unpinned → "Pin this video") and CP-63 (pinned → "Unpin this video") |
 | Remove control | `✕`, revealed on row hover, always keyboard-focusable |
 | Whole-row target | `<a href="https://www.youtube.com/watch?v={id}" target="_blank" rel="noopener noreferrer">` |
 
-**Sort order:** `updated` descending — most recently watched first. Not configurable.
+**Pinned state is visible without hovering** via the thumbnail's persistent pinned badge above; the
+*interactive* pin/unpin control is still hover-revealed like the remove control, consistent with this
+row's existing disclosure pattern. The two are deliberately separate: one shows state, the other
+changes it.
+
+**Sort order** *(revised in v3.0)*: pinned entries first, most recently watched first within that
+group; then unpinned entries, most recently watched first within that group. Neither ordering is
+user-configurable — pin/unpin is the only lever, and `updated` is the only within-group sort.
+
+**Title not yet backfilled** *(v3.0 clarification, no new copy)*: if a title could not be captured
+when an entry was first saved, the row shows the existing CP-37 fallback (`Untitled video`) — this
+is unchanged from v2.0. What's new in v3.0 is that a title is no longer permanently stuck: the next
+time the user watches that same video, the title is captured normally and the row updates to show it
+the next time the panel is opened. There is no live update while the panel is already open and no
+retroactive fetch for videos not currently being watched — this mirrors the existing channel-name
+behaviour exactly (§7.3's CP-37 row; PRD §5.9).
+
+#### Pin Limit Reached
+
+Attempting to pin a 21st video is a **refusal, not a silent no-op, and never an auto-unpin.**
+
+- No `alert()`, no `confirm()`, no modal of any kind — consistent with §9.1's "no browser alerts" constraint
+- A brief inline message (CP-65) appears in the row's action area, replacing the pin control briefly,
+  then the control returns — the same "temporarily replace, then restore" family of pattern as the
+  destructive-action inline confirmations in §6.4, but auto-dismissing rather than awaiting a choice
+  (there is nothing to confirm; the action was simply refused)
+- Auto-dismiss after **~2.5 seconds**, matching the resume toast's brevity (§5) — long enough to read, short enough not to block the row
+- The attempted video remains unpinned; the 20 existing pins are untouched
 
 **Thumbnail failure:** on load error, show a neutral placeholder. Never a broken-image icon, never a console error. Deleted and private videos are an expected case, not a bug. The duration badge and progress line still render on the placeholder — they're independent of the image itself.
 
@@ -461,16 +504,26 @@ Both use the **inline confirmation pattern** — the button is replaced in place
 
 ```
 Before:   [ Clear saved progress ]
-After:    Clear all saved resume data?   [ Clear ] [ Cancel ]
+After:    Clear all saved resume data?
+          This includes 3 pinned videos.        [ Clear ] [ Cancel ]
 Confirmed: button restored; list view now shows the empty state
 ```
 
 | Action | Deletes | Must NOT touch |
 |---|---|---|
-| `Clear saved progress` | `youtubeResume` | Settings, schema version |
-| `Reset to defaults` | Settings values | Saved videos |
+| `Clear saved progress` | `youtubeResume`, **including pinned entries** *(v3.0)* | Settings, schema version |
+| `Reset to defaults` | Settings values | Saved videos, pinned or not |
 
 This separation is a hard requirement, not a nicety. It is why settings live under their own storage key.
+
+**Pinned videos are not exempt from this action** *(v3.0)*. Pinning protects an entry from the
+automatic 200-entry eviction cap; it is not an exemption from an explicit, user-initiated "delete
+everything." The existing confirmation copy (CP-49/CP-50) already says "all {n} saved videos," which
+is technically accurate — pinned entries are saved videos — but a user could reasonably assume
+pinning means "protected, full stop." The confirmation must say so plainly (Copy Rule 4, §2.3):
+when at least one video is pinned, CP-50 is followed by a second line, CP-66 (plural) or CP-67
+(singular), naming the pinned count explicitly. CP-49 and CP-50 themselves are unchanged — this is
+an addition, not a rewrite.
 
 #### Support Section
 
@@ -559,6 +612,14 @@ The single source of truth for all user-facing text.
 | CP-38 | Header — count, plural | `{n} saved videos` |
 | CP-39 | Header — count, singular | `1 saved video` |
 
+**Pinning, added in v3.0:**
+
+| ID | Element | Copy |
+|---|---|---|
+| CP-62 | Row — pin control `aria-label`, unpinned state | `Pin this video` |
+| CP-63 | Row — pin control `aria-label`, pinned state | `Unpin this video` |
+| CP-65 | Pin-limit-reached inline message | `You can pin up to 20 videos` |
+
 ### 7.4 Popup — Settings View *(new in v2.0)*
 
 | ID | Element | Copy |
@@ -589,6 +650,13 @@ The single source of truth for all user-facing text.
 | CP-59 | Cross-promo — product name | `Session Switcher` |
 | CP-60 | Cross-promo — description | `Switch between multiple account sessions.` |
 | CP-61 | Header — Ko-fi icon `aria-label` | `Support on Ko-fi` |
+
+**Pinning, added in v3.0:**
+
+| ID | Element | Copy |
+|---|---|---|
+| CP-66 | Confirmation body — pinned note, plural, appended after CP-50 when applicable | `This includes {p} pinned videos.` |
+| CP-67 | Confirmation body — pinned note, singular, appended after CP-50 when applicable | `This includes 1 pinned video.` |
 
 ### 7.5 Retired Copy IDs
 
@@ -629,6 +697,9 @@ The single source of truth for all user-facing text.
 |---|---|
 | Row navigation | Every row reachable by Tab; Enter opens the video |
 | Remove control | Keyboard-focusable even though revealed on hover; never hover-only |
+| Pin control *(v3.0)* | Keyboard-focusable even though revealed on hover; never hover-only. `aria-pressed` reflects state; `aria-label` announces the action that will result (CP-62/CP-63), not just a static name |
+| Pinned badge *(v3.0)* | `aria-hidden="true"` — decorative once the pin control's own accessible name already conveys state; not a duplicate announcement |
+| Pin limit message *(v3.0)* | Announced via `aria-live="polite"`, matching the existing confirmation-copy pattern below |
 | Thumbnails | `alt=""` — decorative; the adjacent title carries the meaning |
 | Settings controls | Segmented groups use `role="radiogroup"` with `aria-checked`; toggles use `role="switch"` |
 | Setting helper text | Associated with its control via `aria-describedby` |
@@ -688,4 +759,4 @@ The single source of truth for all user-facing text.
 
 ---
 
-*This document is the authoritative UI/UX specification for YouTube Resume v2.0.0. All copy, layout, and interaction decisions trace back to requirements defined here. Deviations require product sign-off and must be reflected in this document and the companion PRD.*
+*This document is the authoritative UI/UX specification for YouTube Resume v3.0.0. All copy, layout, and interaction decisions trace back to requirements defined here. Deviations require product sign-off and must be reflected in this document and the companion PRD.*
