@@ -755,22 +755,22 @@ is exposed, not a new surface.
 
 ### Tasks
 
-- [ ] 5.1 — Add a pin control (icon button) to each row in the existing saved-videos list, toggling
+- [x] 5.1 — Add a pin control (icon button) to each row in the existing saved-videos list, toggling
   `pinProgress`/`unpinProgress`. Reveal-on-hover, keyboard-focusable, consistent with the existing
   per-row remove control's interaction pattern (Roadmap v2 8.7).
-- [ ] 5.2 — **Pinned entries sort to the top** of the list, above all unpinned entries; within each
+- [x] 5.2 — **Pinned entries sort to the top** of the list, above all unpinned entries; within each
   group, sort by `updated` descending, matching the existing sort order.
-- [ ] 5.3 — Visually distinguish a pinned row (e.g. a filled pin glyph vs. an outline glyph) so pin
+- [x] 5.3 — Visually distinguish a pinned row (e.g. a filled pin glyph vs. an outline glyph) so pin
   state is visible without hovering.
-- [ ] 5.4 — When the popup shows the cap has been reached (20/20 pinned) and the user attempts to pin
+- [x] 5.4 — When the popup shows the cap has been reached (20/20 pinned) and the user attempts to pin
   a 21st, surface a brief inline message rather than a silent no-op — new copy, no alert/confirm
   dialog.
-- [ ] 5.5 — **New copy IDs continue from CP-61** (the last ID in use, per UX Spec §7). Assign the next
+- [x] 5.5 — **New copy IDs continue from CP-61** (the last ID in use, per UX Spec §7). Assign the next
   free IDs (starting **CP-62**) to: the pin button's `aria-label` (pinned vs. unpinned state), and the
   cap-reached inline message. Write following UX Spec §2 voice rules; add to the §7 copy table.
-- [ ] 5.6 — No `innerHTML` anywhere in the new markup. Icons via `document.createElement` /
+- [x] 5.6 — No `innerHTML` anywhere in the new markup. Icons via `document.createElement` /
   inline-SVG-as-DOM-nodes, consistent with the existing Ko-fi icon (D-058).
-- [ ] 5.7 — Render performance: pinning/unpinning must re-render only the affected row's position and
+- [x] 5.7 — Render performance: pinning/unpinning must re-render only the affected row's position and
   the two group boundaries, not rebuild the entire list, to hold the existing under-200ms-at-200-entries
   budget (Roadmap v2, T8.2).
 
@@ -789,14 +789,54 @@ is exposed, not a new surface.
 
 ### Exit Criteria
 
-- [ ] T5.1–T5.8 all pass
-- [ ] UX Spec §7 copy table includes every new CP ID introduced by this phase, with no gap or reuse of CP-30–CP-61
+- [x] T5.1–T5.8 all pass
+- [x] UX Spec §7 copy table includes every new CP ID introduced by this phase, with no gap or reuse of CP-30–CP-61
 
 ### Docs to Update
 
 - UX Spec §6 (saved-videos panel — pin control, sort order), §7 (new CP-62+ entries)
 - TDD §4.11 (popup rendering — pin sort/re-render behaviour)
 - PRD §5.9, §7.3
+
+---
+
+## Phase 5 Findings
+
+Verified live via `chrome-devtools-mcp` (D-051/D-052 technique) against the popup page loaded from
+the built extension, with `chrome.storage.local` seeded to 200 entries (20 pinned) directly rather
+than via real playback — same precondition-write technique Phase 7/8 used.
+
+**T5.6 — render budget.** A `MutationObserver` timing the gap between navigation start and the 200th
+`.video-row` appearing measured ~19ms, against the 200ms budget (Roadmap v2 T8.2) — no regression
+from adding the pin control/badge/sort-key attributes to each row's construction.
+
+**T5.1/T5.2/T5.7 — pin/unpin re-render.** Clicking a mid-list unpinned row's pin control moved it to
+the pinned-group boundary and back on unpin, verified by reading `chrome.storage.local` back (matched
+the DOM exactly) and by confirming every other row's element identity was untouched (`document.contains`
+still true for all of them) — one row moved, nothing rebuilt.
+
+**T5.3 — cap reached.** With the seed already at 20 pinned, attempting a 21st pin surfaced the CP-65
+message verbatim (`You can pin up to 20 videos`) in place of the pin control, which reappeared after
+the message's own dismissal; `storageManager.pinProgress` rejected with a `pin cap` message and the
+store was confirmed unchanged.
+
+**T5.4 — keyboard.** `.row-link`, `.pin-btn`, `.remove-btn` are three native, independently-focusable
+siblings (`tabIndex === 0` on all three) in that DOM order (pin before remove, matching the UX Spec
+§6.3 reading order) — native `<a>`/`<button>` semantics make Enter/Space activation structural, not
+something this phase's code could break.
+
+**T5.5/T5.8 — visual state and copy.** Badge presence/absence on the thumbnail is the sole
+hover-independent pinned/unpinned signal (confirmed toggling with each pin/unpin); `aria-label`
+strings read back as exactly `Pin this video` / `Unpin this video` / `You can pin up to 20 videos` —
+byte-identical to UX Spec §7's CP-62/63/65 rows.
+
+**Bug found and fixed by this same live testing (folded into D-095, not filed as a separate defect):**
+the pin-toggle handler was moving the DOM node and updating the button's own ARIA state but never
+writing the new `pinned`/`updated` values back onto `li.dataset` — so a *second* toggle on any row
+read stale sort-key data from its own element and mis-sorted. Caught because the first live
+pin-then-unpin round-trip produced a row whose `aria-label` and `dataset.pinned` disagreed. Fixed by
+setting `li.dataset.pinned` in the same handler that already updates the button and badge; re-verified
+clean on reload with a fresh seed.
 
 ---
 

@@ -14,7 +14,7 @@
 | 2 | Storage Integrity | AWAITING VERIFICATION | — |
 | 3 | Resume Gate & Write Protection | AWAITING VERIFICATION | — |
 | 4 | Pinning Data Layer | DONE | — |
-| 5 | Pinning UI | NOT STARTED | — |
+| 5 | Pinning UI | AWAITING VERIFICATION | — |
 | 6 | Doc Reconciliation, Regression & Store Release | NOT STARTED | — |
 | — | `docs/ROADMAP_v3.md` (latest revision: task 0.0 rewritten headless-first (owner pastes one storage export), 0.0-vs-T0.8 evidence-precedence table, T0.6 baseline fix) | AWAITING VERIFICATION | — |
 | — | `docs/PRD_YouTube_Resume.md` bumped to 3.0.0 (§5.10 defect guarantees, §5.11 pinning, G12/G13, §6.1/§6.3 debugLogger fix, NG8 pinning exception) | AWAITING VERIFICATION | — |
@@ -50,9 +50,9 @@ in-player UI (Phase 5), single-`setInterval` fix (D-059). Full history in `docs/
 
 ## Next action
 
-Phases 0/2/3/4 AWAITING VERIFICATION (owner review needed for Phase 0's visual-facing implications; 2,
-3, and 4 self-verified — 2/3 live via `chrome-devtools-mcp`, 4 via a Node `vm` harness against the real
-`storageManager.js` since it has no DOM/UI surface this phase — no owner action needed; see
+Phases 0/2/3/4/5 AWAITING VERIFICATION (owner review needed for Phase 0's visual-facing implications; 2,
+3, 4, and 5 self-verified — 2/3/5 live via `chrome-devtools-mcp`, 4 via a Node `vm` harness against the
+real `storageManager.js` since it had no DOM/UI surface that phase — no owner action needed; see
 ROADMAP_v3.md's "Phase N Findings" per phase). **Phase 1 DONE** (owner-confirmed). Phase 3:
 `progressTracker` disarms on load, arms only once `tryResume()` settles (D-066/D-091); one
 native-override re-assert (D-090); interval-only backward-jump write guard closes defect C
@@ -60,8 +60,13 @@ structurally (D-090); Restart button needed and got an explicit baseline-reset c
 false-positive bug found and fixed live (D-092), not just insurance. Phase 4: schema bumped 2→3
 (D-071), `pinProgress`/`unpinProgress` added, 20-pin cap enforced with no auto-unpin (D-067), eviction
 now excludes pinned entries from both count and candidates, `clearAllProgress` still removes pins
-(T4.1–T4.8 all pass, D-093). Phase 5 (pinning UI) next. **Drift fixed:** TDD §4.4/§4.5/§4.6 now cover
-the arm/disarm gate, write guards, and pinning; TDD still stale on the rest of `debugLogger.js`.
+(T4.1–T4.8 all pass, D-093). Phase 5: pin/unpin control + persistent pinned badge added to each
+saved-videos row, two-tier sort (pinned first, then unpinned, `updated` descending within each
+group), CP-65 cap-reached inline message — all self-verified live via `chrome-devtools-mcp` against a
+seeded 200-entry/20-pinned profile (T5.1–T5.8 all pass, D-095); toggling pins/unpins exactly one row
+(~19ms render at 200/20-pinned, well under the 200ms budget). Phase 6 (doc reconciliation, regression,
+store release) next. **Drift fixed:** TDD §4.4/§4.5/§4.6/§4.11 now cover the arm/disarm gate, write
+guards, and pinning (data layer + UI); TDD still stale on the rest of `debugLogger.js`.
 
 ## Doc versions
 

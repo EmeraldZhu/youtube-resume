@@ -410,6 +410,7 @@ Clicking the extension icon opens a panel listing saved videos, newest first.
 
 **Each row shows:**
 - Video thumbnail (144×81), with the video's duration and a watched-progress line overlaid on it, YouTube-style
+- A pinned badge on the thumbnail *(v3.0)*, shown only when the video is pinned — visible without hovering
 - Video title, falling back to `Untitled video` where unknown
 - Channel/uploader name, omitted entirely when not yet captured (no placeholder text)
 - Saved position and total duration, plus percentage watched
@@ -417,6 +418,7 @@ Clicking the extension icon opens a panel listing saved videos, newest first.
 **Behaviour:**
 - Clicking a row opens that video in a new tab; the extension then resumes it through the normal resume path — no separate mechanism
 - Each row has a remove control deleting that single entry, updating the list in place
+- Each row has a pin/unpin control *(v3.0, §5.11)*, revealed on hover like the remove control; toggling it re-sorts only that row, not the full list
 - Empty state is shown when nothing is saved
 - The header shows the saved count, an icon-only Ko-fi support link, and a control to open settings
 - Rendering completes in under 200ms with a full 200 entries; thumbnails may load progressively but must not block the list

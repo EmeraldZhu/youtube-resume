@@ -16,6 +16,33 @@ function formatTime(seconds) {
   return `${mins}:${String(secs).padStart(2, '0')}`;
 }
 
+const SVG_NS = 'http://www.w3.org/2000/svg';
+// Material Icons "push_pin" glyph — outlined (stroke) when unpinned, filled
+// (fill) when pinned. Same path both ways so "outline vs filled" (UX Spec
+// §6.3 Row Specification) is a literal toggle of the same shape, not two
+// different icons.
+const PIN_PATH_D = 'M16 12V4h1V2H7v2h1v8l-2 2v2h5.2v6h1.6v-6H18v-2l-2-2z';
+
+function createPinIcon(pinned, size) {
+  const svg = document.createElementNS(SVG_NS, 'svg');
+  svg.setAttribute('width', String(size));
+  svg.setAttribute('height', String(size));
+  svg.setAttribute('viewBox', '0 0 24 24');
+  svg.setAttribute('aria-hidden', 'true');
+  const path = document.createElementNS(SVG_NS, 'path');
+  path.setAttribute('d', PIN_PATH_D);
+  if (pinned) {
+    path.setAttribute('fill', 'currentColor');
+  } else {
+    path.setAttribute('fill', 'none');
+    path.setAttribute('stroke', 'currentColor');
+    path.setAttribute('stroke-width', '1.5');
+    path.setAttribute('stroke-linejoin', 'round');
+  }
+  svg.appendChild(path);
+  return svg;
+}
+
 document.addEventListener('DOMContentLoaded', async () => {
   // View switching
   const viewList = document.getElementById('view-list');
@@ -63,10 +90,69 @@ document.addEventListener('DOMContentLoaded', async () => {
     }
   }
 
+  // Two-tier sort (UX Spec §6.3, Roadmap 5.2): pinned entries first (most
+  // recent within that group), then unpinned (most recent within that
+  // group). Rows carry their own sort key as data attributes so pin/unpin
+  // can find the correct re-insertion point by reading live DOM order
+  // instead of maintaining a parallel JS array (5.7 — move one row, not a
+  // full rebuild).
+  function shouldPrecede(pinned, updated, row) {
+    const rowPinned = row.dataset.pinned === 'true';
+    if (pinned !== rowPinned) return pinned;
+    return updated > Number(row.dataset.updated);
+  }
+
+  function moveRowToSortedPosition(li, pinned, updated) {
+    li.remove();
+    const rows = Array.from(listEl.children);
+    const insertBefore = rows.find((row) => shouldPrecede(pinned, updated, row));
+    if (insertBefore) {
+      listEl.insertBefore(li, insertBefore);
+    } else {
+      listEl.appendChild(li);
+    }
+  }
+
+  function updatePinBadge(thumbWrap, pinned) {
+    const existing = thumbWrap.querySelector('.thumb-pin-badge');
+    if (pinned) {
+      if (!existing) {
+        const badge = document.createElement('div');
+        badge.className = 'thumb-pin-badge';
+        badge.setAttribute('aria-hidden', 'true');
+        badge.appendChild(createPinIcon(true, 12));
+        thumbWrap.insertBefore(badge, thumbWrap.firstChild);
+      }
+    } else if (existing) {
+      existing.remove();
+    }
+  }
+
+  function updatePinButton(pinBtn, pinned) {
+    pinBtn.classList.toggle('pinned', pinned);
+    pinBtn.setAttribute('aria-pressed', String(pinned));
+    pinBtn.setAttribute('aria-label', pinned ? 'Unpin this video' : 'Pin this video');
+    pinBtn.replaceChildren(createPinIcon(pinned, 13));
+  }
+
+  function showPinCapMessage(li, pinBtn) {
+    pinBtn.classList.add('hidden');
+    const msg = document.createElement('div');
+    msg.className = 'pin-cap-message';
+    msg.textContent = 'You can pin up to 20 videos';
+    li.appendChild(msg);
+    setTimeout(() => {
+      msg.remove();
+      pinBtn.classList.remove('hidden');
+    }, 2500);
+  }
+
   function buildRow(videoId, entry) {
     const li = document.createElement('li');
     li.className = 'video-row';
     li.dataset.id = videoId;
+    li.dataset.pinned = entry.pinned ? 'true' : 'false';
+    li.dataset.updated = String(entry.updated);
 
     const link = document.createElement('a');
     link.className = 'row-link';
@@ -96,6 +182,10 @@ document.addEventListener('DOMContentLoaded', async () => {
     } else {
       thumbWrap.classList.add('placeholder');
     }
+
+    // Pinned badge (D-077, UX Spec §6.3): passive, always-visible indicator
+    // — the interactive pin control below is the hover-revealed toggle.
+    updatePinBadge(thumbWrap, !!entry.pinned);
 
     const duration = entry.duration > 0 ? entry.duration : 0;
     const percent = duration > 0 ? Math.min(100, Math.max(0, Math.round((entry.time / duration) * 100))) : 0;
@@ -139,6 +229,40 @@ document.addEventListener('DOMContentLoaded', async () => {
     link.appendChild(thumbWrap);
     link.appendChild(textBlock);
 
+    // Pin control (5.1, D-077): reading order "pin, then remove" (UX Spec
+    // §6.3) — appended before the remove button below, both siblings of
+    // the link so each is independently reachable by Tab (T5.4).
+    const pinBtn = document.createElement('button');
+    pinBtn.type = 'button';
+    pinBtn.className = 'pin-btn';
+    pinBtn.appendChild(createPinIcon(!!entry.pinned, 13));
+    pinBtn.setAttribute('aria-pressed', String(!!entry.pinned));
+    pinBtn.setAttribute('aria-label', entry.pinned ? 'Unpin this video' : 'Pin this video');
+    if (entry.pinned) pinBtn.classList.add('pinned');
+    pinBtn.addEventListener('click', async (e) => {
+      e.preventDefault();
+      const willPin = !pinBtn.classList.contains('pinned');
+      try {
+        if (willPin) {
+          await storageManager.pinProgress(videoId);
+        } else {
+          await storageManager.unpinProgress(videoId);
+        }
+      } catch (err) {
+        if (willPin && /pin cap/.test(err.message)) {
+          showPinCapMessage(li, pinBtn);
+        } else {
+          console.warn('[YTResume] Failed to toggle pin:', err);
+        }
+        return;
+      }
+      entry.pinned = willPin;
+      li.dataset.pinned = willPin ? 'true' : 'false';
+      updatePinButton(pinBtn, willPin);
+      updatePinBadge(thumbWrap, willPin);
+      moveRowToSortedPosition(li, willPin, entry.updated);
+    });
+
     const removeBtn = document.createElement('button');
     removeBtn.type = 'button';
     removeBtn.className = 'remove-btn';
@@ -157,6 +281,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     });
 
     li.appendChild(link);
+    li.appendChild(pinBtn);
     li.appendChild(removeBtn);
     return li;
   }
@@ -168,7 +293,12 @@ document.addEventListener('DOMContentLoaded', async () => {
     ]);
     loadThumbnails = settings.loadThumbnails;
 
-    const entries = Object.entries(store).sort((a, b) => b[1].updated - a[1].updated);
+    // Two-tier sort (UX Spec §6.3): pinned entries first, then unpinned;
+    // most recently watched first within each group.
+    const entries = Object.entries(store).sort((a, b) => {
+      if (!!a[1].pinned !== !!b[1].pinned) return a[1].pinned ? -1 : 1;
+      return b[1].updated - a[1].updated;
+    });
     entries.forEach(([videoId, entry]) => {
       listEl.appendChild(buildRow(videoId, entry));
     });

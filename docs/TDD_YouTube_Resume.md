@@ -1483,6 +1483,28 @@ already-fetched object and appended in a single pass, with thumbnails loading pr
 `popup.js` — no dynamic state, so no reason to construct it at runtime. Inline `<svg>` markup in the
 HTML source is not the `innerHTML` API and doesn't trip T8.13's grep.
 
+**Pin control and sort (v3 — Phase 5, D-077/D-078):** each row carries `data-pinned`/`data-updated`
+attributes mirroring its `pinned`/`updated` fields. The list is built once, sorted two-tier (pinned
+first, then unpinned; `updated` descending within each group) — same single-pass construction as the
+v2 build, no separate pass. A `<button class="pin-btn">` (outline glyph unpinned, filled glyph
+pinned — both built from one `push_pin` SVG path toggling `fill`/`stroke`, via
+`document.createElementNS`, not `innerHTML`) sits as a sibling of `.row-link` and `.remove-btn`,
+in that DOM order, so Tab visits link → pin → remove. A persistent `.thumb-pin-badge` (same icon,
+always filled) is appended to `.thumb-wrap` only when pinned — independent of row hover, so pinned
+state reads without it.
+
+**Pin/unpin re-render (5.7):** `storageManager.pinProgress`/`unpinProgress` resolve, then exactly one
+row moves: `li.dataset.pinned`/`updated` are updated, the row is detached and re-inserted by scanning
+current sibling `<li>`s' own `data-pinned`/`data-updated` for the first row the moved entry must
+precede (`shouldPrecede`) — no other row is touched, no full list rebuild, no re-read from storage
+(T5.1/T5.2/T5.7's ~19ms-at-200-entries-with-20-pinned measurement, D-095).
+
+**Pin cap (D-067):** `pinProgress` rejects with a message containing `pin cap` when `MAX_PINNED` (20)
+is already reached. `popup.js` matches on that substring to distinguish a cap refusal from any other
+rejection; only the cap case shows the CP-65 inline message (`.pin-cap-message`, positioned over the
+control's usual spot, auto-removed after 2.5s via `setTimeout`) — any other error just logs a warning,
+matching the existing failure-matrix convention (§7.2).
+
 ---
 
 ## 5. Inter-Module Contracts
