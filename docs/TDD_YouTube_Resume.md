@@ -7,10 +7,11 @@
 |---|---|
 | **Product** | YouTube Resume |
 | **Document Type** | Technical Design Document (TDD) |
-| **Version** | 2.0.0 |
-| **Status** | Reconciled against shipped v2.0.0 code (Phase 9, D-030) |
-| **Last Updated** | 2026-07-27 |
-| **Companion Document** | PRD_YouTube_Resume.md v2.0.0 |
+| **Version** | 3.0.0 |
+| **Previous Version** | 2.0.0 |
+| **Status** | Reconciled against shipped v3.0.0 code (Phase 6, Roadmap v3 6.6) |
+| **Last Updated** | 2026-08-10 |
+| **Companion Document** | PRD_YouTube_Resume.md v3.0.0 |
 
 ---
 
@@ -31,6 +32,7 @@
    - 4.9 [timeUtils.js](#49-timeutilsjs)
    - 4.10 [popup/popup.js — Settings Panel](#410-popuppopupjs--settings-panel-v2--phase-6)
    - 4.11 [popup/popup.js — Saved Videos List](#411-popuppopupjs--saved-videos-list-v2--phase-8)
+   - 4.12 [debugLogger.js](#412-debugloggerjs)
 5. [Inter-Module Contracts](#5-inter-module-contracts)
 6. [State Management](#6-state-management)
 7. [Error Handling Strategy](#7-error-handling-strategy)
@@ -165,19 +167,29 @@ This flow executes once on cold load, and repeats from step 2 on every SPA navig
         ├── [null] → skip to step 7
         │
         ▼
-6. resumeManager.tryResume(video, savedProgress, videoId, settings)
+6a. progressTracker.start(video, videoId, settings) — called *before* tryResume, disarmed
+   └── Registers event listeners (pause, seeked, ended, visibilitychange, pagehide); 5s save
+       cadence rides navigationManager's tick (D-059), no interval of its own
+   └── `armed = false` (v3 Phase 3, D-066/D-091) — any trigger firing during the resume attempt
+       below is silently dropped, not queued, so a resume-triggered seek can never be mistaken
+       for a user write
+        │
+        ▼
+6b. resumeManager.tryResume(video, savedProgress, videoId, settings)
    └── Rejects saved.time below minWatchSeconds before paying for the metadata wait (D-038/D-043)
    └── Waits for video.duration (loadedmetadata, one retry) and re-checks shouldResume()
    └── Defers until no ad is showing/interrupting, re-deferring if one starts mid-delay (D-019/D-040)
    └── Waits 400ms, baselined for a 10s drift-tolerant abort guard (D-021/D-037)
    └── Sets video.currentTime = resumeTime, verifies within 3s over up to 3 attempts (D-022)
    └── Only on a verified seek: uiInjector.showRestartButton() / showToast(), each settings-gated
+   └── Re-asserts the seek once, 500ms after verification, in case a native YouTube resume raced
+       and overrode it (v3 Phase 3, D-090/G13)
+   └── `finally`: progressTracker.arm() (v3 Phase 3, D-066/D-091) — runs whether tryResume
+       resolved, rejected, or found nothing to resume, so tracking is never left permanently
+       disarmed
         │
         ▼
-7. progressTracker.start(video, videoId, settings)
-   └── Registers event listeners (pause, seeked, ended, visibilitychange, pagehide); 5s save
-       cadence rides navigationManager's tick (D-059), no interval of its own
-   └── Saves progress via storageManager on each trigger, subject to the guards in §3.3
+7. Tracking is now live and armed; see §3.3 for the per-trigger save flow
 ```
 
 See §4.4/§4.5 for the full logic each step above is a summary of — this diagram shows sequencing,
@@ -206,6 +218,14 @@ playerObserver.disconnect()
 [trigger: interval | pause | seeked | ended | visibilitychange | pagehide]
         │
         ▼
+Guard (v3 Phase 3, D-066): armed?
+        │
+    NO  │  YES
+    │   │
+    ▼   ▼
+ (no-op, │
+  dropped)
+        ▼
 progressTracker reads video.currentTime
         │
         ▼
@@ -221,20 +241,28 @@ Guard: adPlaying? liveStream (duration === Infinity)? invalid position
     │    YES │  NO (pause/seeked/ended/visibilitychange/pagehide)
     │    │   │
     │    ▼   ▼
-    │  abs(currentTime - lastSavedTime) >= 5 ?     save unconditionally
+    │  abs(currentTime - lastSavedTime) >= 5              save unconditionally
+    │  AND NOT a backward jump >30s (v3, D-090)?
     │    │
     │  NO │ YES
     │  │  │
     │  │  ▼
     │  │ storageManager.saveProgress(videoId, currentTime, duration)
     │  │  └── Reads full store
-    │  │  └── Upserts entry
-    │  │  └── Checks entry count > 200 → evict oldest
+    │  │  └── Upserts entry; preserves existing entry's pinned flag if present (v3 Phase 4)
+    │  │  └── Filters to unpinned entries; if that count > 200 → evict oldest unpinned
+    │  │       (v3 Phase 4, D-067 — pinned entries are exempt from both the count and
+    │  │       the removal-candidate pool)
     │  │  └── Writes back to chrome.storage.local
     │  │
     ▼  ▼
   (no-op)
 ```
+
+> **Backward-jump guard scope (D-090):** the `>30s` backward-jump rejection applies only to the
+> interval trigger's delta check above — a genuine user seek (`seeked` trigger) saves
+> unconditionally and its own write updates `lastSavedTime`, which is what exempts the *next*
+> interval tick from a false-positive rejection (see D-090's note in `docs/DECISIONS.md`).
 
 > **D-024:** the delta guard applies **only** to the interval trigger. Every event trigger
 > (`pause`, `seeked`, `ended`, `visibilitychange`, `pagehide`) saves unconditionally once the
@@ -1436,6 +1464,17 @@ only); `Reset to defaults` calls `storageManager.resetSettings()` (removes/overw
 `youtubeResumeSettings` only). Each path is wired to a disjoint storage key, which is what makes T6.7
 and T6.9 (cross-key isolation) structurally guaranteed rather than merely tested.
 
+**Pinned-count disclosure on clear (v3 — Phase 5/6, D-080):** a module-level `pinnedCount` is kept in
+sync with storage without a re-read: seeded from the initial `getAllProgress()` result, incremented/
+decremented on each pin/unpin toggle (§4.11) and on deleting a pinned row, and reset to `0` after
+`clearAllProgress()` resolves. When the `Clear saved progress` confirmation panel opens and
+`pinnedCount > 0`, a `<p id="confirm-pinned-note">` (hidden by default) is unhidden and set to CP-66
+(`This includes {p} pinned videos.`, plural) or CP-67 (`This includes 1 pinned video.`, singular);
+otherwise it stays hidden. CP-49/CP-50 themselves are unchanged — this is an appended line, not a
+rewrite. Closes a gap Phase 5 left open: D-080 specified this in the UX Spec but no Phase 5 task named
+it as a code deliverable; Phase 6 built it per CLAUDE.md's "doc is wrong or contradicts the code, fix
+it" latitude rather than just flagging the gap in docs (see D-096).
+
 ---
 
 ### 4.11 `popup/popup.js` — Saved Videos List (v2 — Phase 8)
@@ -1505,6 +1544,36 @@ rejection; only the cap case shows the CP-65 inline message (`.pin-cap-message`,
 control's usual spot, auto-removed after 2.5s via `setTimeout`) — any other error just logs a warning,
 matching the existing failure-matrix convention (§7.2).
 
+### 4.12 `debugLogger.js`
+
+**Purpose:** Phase 1 (v2.0) reliability-audit instrumentation, loaded first in `manifest.json`'s
+`content_scripts` array — `storage/storageManager.js` → `utils/debugLogger.js` → the rest of
+`utils/` → `content/*` (CLAUDE.md's load-order rule) — and also included directly in `popup/popup.html`
+(D-084) since the popup context loads no content-script bundle. Kept as shipped infrastructure in
+v3.0: Roadmap v3 6.1 confirmed it is not removed this release, since removing it would require editing
+`manifest.json`/`popup.html`, which is out of scope for a docs-only phase and no v3 phase asked for it.
+
+**Public API:**
+
+```
+debugLogger.DEBUG              → boolean   // module-level constant, false in shipped code
+debugLogger.log(stage, data?)  → void      // no-op entirely when DEBUG is false
+```
+
+**No-op guarantee:** `log()` returns immediately if `DEBUG` is `false` — no `console.log` call, no
+`JSON.stringify` of `data`, no observable side effect. This is what makes shipped behaviour identical
+to a build with the calls removed outright (§7.1). When `DEBUG` is `true`, `log(stage, data)` prints
+`[YTResume] {stage}` followed by `JSON.stringify(data)` if `data` was passed, or just the stage name
+if it wasn't.
+
+**Callers (v2.0+):** `resumeManager`, `playerObserver`, `progressTracker`, and `navigationManager`
+call it at key decision points (ad state, guard checks, seek verification, save triggers, re-emit
+checks) — see §7.1.5 for the full rationale. No v3 module added new call sites; the v3 defect fixes
+(Phase 0–3) were diagnosed and verified via `chrome-devtools-mcp` live sampling (D-052) rather than by
+extending this module.
+
+**Constraint:** must never ship with `DEBUG = true` (CLAUDE.md hard constraint, §7.1.5).
+
 ---
 
 ## 5. Inter-Module Contracts
@@ -1523,6 +1592,7 @@ This table defines what each module **consumes** and what it **produces**. No mo
 | `youtubeUtils.js` | *(window.location, document.title/DOM)* | `navigationManager.js`, `bootstrap.js`, `progressTracker.js` (title/channel capture, v2) |
 | `timeUtils.js` | *(no dependencies)* | `resumeManager.js`, `progressTracker.js` (v2, D-050) |
 | `popup/popup.js` *(v2 — Phases 6/8)* | `storageManager.js` | Nothing (leaf; runs in its own document, never in page context) |
+| `debugLogger.js` | *(no dependencies)* | `resumeManager.js`, `playerObserver.js`, `progressTracker.js`, `navigationManager.js` (§4.12) |
 
 ---
 
@@ -1542,12 +1612,14 @@ There is no global state object. Each module manages its own internal state priv
 | `minWatchSeconds` *(v2 — Phase 7)* | `progressTracker` | On `start()`, from `settings` param | On `stop()`, back to the 30s default |
 | `buttonElement` | `uiInjector` | On `showRestartButton()` | On `cleanup()` or click |
 | `dismissTimer` | `uiInjector` | On `showRestartButton()` | On `cleanup()` or click |
+| `armed` *(v3 — Phase 3, D-066)* | `progressTracker` | `false` on `start()`; `true` via `arm()` after the resume lifecycle resolves | On `stop()`, back to `false` |
 
 ### 6.2 Persistent State
 
 Persistent state lives in `chrome.storage.local` under three root keys (v2, PRD §7.2): `youtubeResume`
 (videoId → `VideoProgress`, unchanged from v1), `youtubeResumeSettings` (user preferences), and
-`youtubeResumeSchema` (integer schema version, currently `2`). The latter two are siblings of
+`youtubeResumeSchema` (integer schema version, currently `3` as of v3.0 Phase 4, D-071 — `pinned` is
+the only field it adds, optional and defaulting to unpinned). The latter two are siblings of
 `youtubeResume`, never nested inside it, since its keys are counted for the 200-entry eviction cap
 (D-013). No module other than `storageManager.js` may read from or write to `chrome.storage.local`
 directly — this now also covers the popup, which loads `storage/storageManager.js` as of Phase 4
@@ -1575,8 +1647,9 @@ listener) for pushing a change into an already-running session, by design.
    shipped behaviour is unaffected. `resumeManager`, `playerObserver`, `progressTracker`, and
    `navigationManager` call it at key decision points (ad state, guard checks, seek verification,
    save triggers, re-emit checks) to make reliability issues reproducible without behaviour
-   changes. Must never be committed with `DEBUG = true`; removed or reconfirmed gated in Phase 9
-   (Roadmap 9.1).
+   changes. Must never be committed with `DEBUG = true` — reconfirmed gated (not removed) at the
+   end of v2.0 Phase 9 (Roadmap 9.1) and again reconfirmed shipped-as-is for v3.0 (Roadmap v3 6.1,
+   §4.12).
 
 ### 7.2 Failure Matrix
 
@@ -1660,7 +1733,11 @@ There is no test runner in this project (CLAUDE.md) — every table below is a m
 script, run in Chrome via Load Unpacked. §11.3 is the original v1.0 regression baseline and is kept
 as-is; §11.1/§11.2 gain v2 rows below for the modules/scenarios that didn't exist in v1.0 (settings,
 saved videos panel, title/channel capture). Nothing in the added rows contradicts §11.3 — they cover
-net-new surface area, not replacements.
+net-new surface area, not replacements. §11.1/§11.2 gain a further set of v3 rows below for the
+storage-integrity fixes, the resume-arm/write-guard gate, and pinning (Roadmap v3 Phases 2–5); each
+was self-verified this session by the methods named in its Notes column of D-085 through D-095
+(`docs/DECISIONS.md`) rather than left as an unexecuted script — the tables below record what to
+re-run on a future regression pass, not open work.
 
 ### 11.1 Unit Tests (Pure Modules)
 
@@ -1688,6 +1765,15 @@ Target: `youtubeUtils.js`, `timeUtils.js`, `storageManager.js`
 | `storageManager` *(v2)* | Settings merge over defaults | `getSettings()` with no stored key | Returns `DEFAULT_SETTINGS` verbatim |
 | `storageManager` *(v2)* | Settings self-heal | `youtubeResumeSettings` manually set to a string | `getSettings()` still returns a full valid `Settings` object |
 | `storageManager` *(v2)* | Title/channel preserved on omission | `saveProgress(id, t, d)` after a prior save had a title | Existing `title`/`channel` untouched (D-016/D-045) |
+| `storageManager` *(v3)* | Whitespace-only title/channel not written back | `saveProgress(id, t, d, '   ', '   ')` after a prior save had a real title | Existing `title`/`channel` untouched, not overwritten with blanks (D-087) |
+| `storageManager` *(v3)* | Schema migration chain, v1→v3 | Seed a v1-shape (no `title`, no schema key) profile, call `migrate()` | Lands cleanly on schema 3; no entry dropped or rewritten beyond the version key (D-093, T4.1) |
+| `storageManager` *(v3)* | Schema migration chain, v2→v3 | Seed a v2-shape profile (`youtubeResumeSchema: 2`), call `migrate()` | Lands on schema 3; existing entries gain no `pinned` field until explicitly pinned (D-071/D-093) |
+| `storageManager` *(v3)* | Duplicate-merge pass is non-destructive | Seed two entries for the same `videoId` under any legacy shape | Merges into one entry; never deletes a distinct `videoId`'s entry (D-065, T2.2/T2.3/T2.7) |
+| `storageManager` *(v3)* | Pin cap enforced | `pinProgress()` 21 times across 21 distinct saved videos | 21st call rejects (`pin cap` in error message); the first 20 remain pinned (D-067/D-093, T4.4) |
+| `storageManager` *(v3)* | Eviction exempts pinned entries | 20 pinned + 200 unpinned entries, then one more `saveProgress()` | Only an unpinned entry is evicted; all 20 pins survive (D-093, T4.6) |
+| `storageManager` *(v3)* | `clearAllProgress` removes pins too | Seed pinned entries, call `clearAllProgress()` | `youtubeResume` is fully empty, including pinned entries (D-093, T4.8) |
+| `progressTracker` *(v3)* | Backward-jump write guard | Interval tick fires with `currentTime` >30s behind `lastSavedTime`, no intervening seek | Save is skipped (D-090); a genuine seek's own `seeked`-triggered save is not blocked (its `lastSavedTime` already advanced) |
+| `progressTracker` *(v3)* | Disarmed-on-load gate | Call any tracked event before `arm()` has been called | Write is silently dropped, not queued (D-066/D-091) |
 
 ### 11.2 Integration Test Scenarios
 
@@ -1710,6 +1796,11 @@ Target: `youtubeUtils.js`, `timeUtils.js`, `storageManager.js`
 | I15 *(v2)* | Saved videos panel — remove | Open popup, click remove on a row | Row disappears immediately; entry deleted from `youtubeResume`; no full re-render (T8.9) |
 | I16 *(v2)* | Saved videos panel — thumbnails off | Turn off `loadThumbnails`, reopen popup | No `<img>` elements exist in any row; zero `i.ytimg.com` requests (T8.8) |
 | I17 *(v2)* | Clear vs. Reset key independence | `Clear saved progress`, then check settings | `youtubeResume` empty; `youtubeResumeSettings` unchanged (T6.7); reverse also holds for `Reset to defaults` (T6.9) |
+| I18 *(v3)* | Resume attempt doesn't self-clobber | Navigate to a video with saved progress; observe the resume seek | The resume-triggered `seeked` event is silently dropped by the disarmed gate, not written back as a new (near-zero) save (D-066/D-091) |
+| I19 *(v3)* | Restart rebases the write guard | Click Restart, then watch past `minWatchSeconds` | First post-restart interval save succeeds; not rejected as a false-positive backward jump from the stale pre-restart position (D-092, T3.8) |
+| I20 *(v3)* | Pin/unpin moves exactly one row | Open popup with a mixed pinned/unpinned list, toggle pin on one row | That row alone re-sorts into the correct group boundary; storage matches DOM after the toggle (D-095, T5.1/T5.2) |
+| I21 *(v3)* | Pin-limit-reached refusal | With 20 videos already pinned, attempt to pin a 21st | CP-65 inline message shown, auto-dismisses ~2.5s later; no entry becomes pinned (D-079/D-095, T5.3) |
+| I22 *(v3)* | Clear-all pinned disclosure | Pin at least one video, click `Clear saved progress` | Confirmation panel shows CP-50 plus CP-66/CP-67 naming the pinned count; confirming still deletes pinned entries too (D-080, §4.10) |
 
 ### 11.3 Manual QA Checklist
 
@@ -1769,7 +1860,7 @@ Target: `youtubeUtils.js`, `timeUtils.js`, `storageManager.js`
 | **`chrome.storage.local` from content scripts** | Fully supported in content scripts under MV3. No messaging to a background worker required. |
 | **CSP restrictions** | No inline `<script>` injection. All DOM manipulation uses `document.createElement`. |
 
-### 12.3 Known Limitations (v2.0)
+### 12.3 Known Limitations (v2.0, carried into v3.0)
 
 | Limitation | Accepted? | Future Fix |
 |---|---|---|
@@ -1780,11 +1871,20 @@ Target: `youtubeUtils.js`, `timeUtils.js`, `storageManager.js`
 | A setting changed in the popup does not take effect on an already-open YouTube tab until its next navigation | ✅ Accepted | No message-passing/storage-listener push exists by design (§6.2) |
 | Thumbnail `<img>` requests to `i.ytimg.com` break the v1.0 absolute zero-network claim | ✅ Accepted, has an off switch | `loadThumbnails` setting, default on (D-004/D-005); privacy policy/store listing updates still **OPEN** (D-032/D-033), due before publishing, not before Phase 9 |
 
+### 12.4 Known Limitations (v3.0)
+
+| Limitation | Accepted? | Future Fix |
+|---|---|---|
+| 20-pin cap is not user-configurable | ✅ Accepted | Small fixed limit by design (D-067), consistent with the six-settings/200-entry-cap philosophy |
+| Pin-limit-reached inline message (CP-65, `.pin-cap-message`) is not wrapped in `aria-live`, so a screen-reader user gets no announcement of the refusal | ❌ Gap, not yet fixed | Found during Phase 6 doc reconciliation (D-097, UX Spec §8.3); needs a code change, out of scope for a docs-only phase |
+| Backward-jump write guard (D-090) only protects interval-triggered saves; a pathological caller writing directly through `storageManager.saveProgress()` with a backward timestamp outside the tracked event flow is not guarded | ✅ Accepted | No such caller exists in shipped code; documented as a boundary of the fix, not a residual bug |
+
 ---
 
-*This document is the authoritative technical specification for YouTube Resume v2.0.0, reconciled
-against shipped code in Phase 9 (D-030). Per CLAUDE.md's precedence rules, this TDD outranks the UX
-Spec, Roadmap, and PRD for implementation detail — but shipped code outranks all four; where a future
-discrepancy is found, fix the code-affecting doc and log a Tier 2 decision in `DECISIONS.md`, don't
-silently drift. §11.3's v1.0 manual QA checklist is kept intact as the regression baseline (see
-§11 intro) — nothing elsewhere in this document should be read as superseding it.*
+*This document is the authoritative technical specification for YouTube Resume v3.0.0, reconciled
+against shipped code in v2.0 Phase 9 (D-030) and again in v3.0 Phase 6 (Roadmap v3 6.6). Per
+CLAUDE.md's precedence rules, this TDD outranks the UX Spec, Roadmap, and PRD for implementation
+detail — but shipped code outranks all four; where a future discrepancy is found, fix the
+code-affecting doc and log a Tier 2 decision in `DECISIONS.md`, don't silently drift. §11.3's v1.0
+manual QA checklist is kept intact as the regression baseline (see §11 intro) — nothing elsewhere in
+this document should be read as superseding it.*

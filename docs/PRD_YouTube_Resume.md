@@ -518,8 +518,8 @@ youtube-resume/
 | `bootstrap.js` | Orchestration only. Owns no logic. Loads settings once per navigation and passes them down. Every promise chain ends in `.catch()`. |
 | `navigationManager.js` | Detects video changes via `yt-navigate-finish`, cold load, URL-polling fallback, and same-video re-entry |
 | `playerObserver.js` | Resolves the `<video>` element, waiting for `#movie_player` if necessary. Exposes ad state. Owns the single `MutationObserver`. |
-| `resumeManager.js` | Validates against settings, gates on ad state, applies the 400ms delay, seeks, and verifies |
-| `progressTracker.js` | Owns the single `setInterval` and all playback event listeners. Captures the video title and channel name on save. |
+| `resumeManager.js` | Validates against settings, gates on ad state, applies the 400ms delay, seeks, and verifies. *(v3.0)* Re-asserts the seek once, 500ms after the initial one, in case a native YouTube resume raced and overrode it (G13/D-090). |
+| `progressTracker.js` | Owns the single `setInterval` and all playback event listeners. Captures the video title and channel name on save. *(v3.0)* Starts disarmed on every load and only arms once the resume attempt resolves, so a resume-triggered seek is never mistaken for a user write; rejects an interval-triggered save that jumps backward more than 30s without a preceding seek (G13/D-066/D-090). |
 | `storageManager.js` | The **only** module that touches `chrome.storage.local`. Owns watch data, settings, eviction, and schema migration. |
 | `uiInjector.js` | Injects and tears down the Restart button and resume toast. `document.createElement` only. |
 | `debugLogger.js` | Gated debug logging, `[YTResume]`-prefixed. No-ops when `DEBUG` is `false`; no other module makes ad hoc `console.log` calls. |
@@ -591,7 +591,7 @@ youtube-resume/
 
 > Schema version and settings are **separate root keys**, never nested inside `youtubeResume`. That object's keys are counted for the 200-entry cap and iterated during eviction; any non-videoId key inside it would corrupt both.
 
-### 7.3 Data Schema — v2
+### 7.3 Data Schema — v3
 
 ```typescript
 type VideoProgress = {
@@ -694,6 +694,12 @@ v3 "Phase 0 Findings"):
   the same one.
 - **Unresolved-ID rejection:** `saveProgress()` refuses (rejects its promise, logged, never thrown
   uncaught) any write whose `videoId` isn't a plausible YouTube video ID shape. No entry is written.
+
+**Schema Migration — v2 → v3 (Roadmap v3 Phase 4, D-071):** the version bump itself — `pinned` added,
+`youtubeResumeSchema` advanced to 3 — lands exclusively in Phase 4, as one more step in the version-aware
+chain above, not in Phase 2's repair work. Also purely additive: `pinned` is optional and every
+existing entry is valid without it (absent = unpinned). No entry is rewritten by the migration step
+itself; `pinned` is only ever set by an explicit pin action (§5.11).
 
 ---
 
@@ -841,6 +847,12 @@ Full phase-by-phase test tables are in ROADMAP_v2.md. This section defines the c
 | Panel row clicked | Video opens and resumes |
 | Thumbnails disabled | Zero network requests |
 | Upgrade from a real v1.0 profile | Zero data loss |
+| *(v3.0)* Title changes after saving | Resume and lookup unaffected; still one entry per video ID (G13/D-A) |
+| *(v3.0)* Title unavailable at save time, repeatedly | At most one entry per video ID; no "Untitled video" pile-up (D-B) |
+| *(v3.0)* Interval save fires with a stale, far-behind `currentTime` | Save rejected; last genuine position is not overwritten (G13/D-C) |
+| *(v3.0)* Pin 20 videos, attempt a 21st | 21st refused; the 20 remain pinned; no auto-unpin |
+| *(v3.0)* 200 unpinned + 20 pinned entries, one more save | Only an unpinned entry is evicted |
+| *(v3.0)* Clear saved progress with pinned videos present | All entries removed, including pinned ones; confirmation names the pinned count |
 
 ### 11.3 Manual QA Checklist
 

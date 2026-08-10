@@ -620,6 +620,12 @@ The single source of truth for all user-facing text.
 | CP-63 | Row — pin control `aria-label`, pinned state | `Unpin this video` |
 | CP-65 | Pin-limit-reached inline message | `You can pin up to 20 videos` |
 
+> **CP-64 intentionally skipped.** Reserved during drafting for the pinned-state thumbnail badge's
+> `aria-label`, but the shipped badge is a passive `aria-hidden="true"` glyph (Row Specification
+> table, §6.3) — the row's pin control already announces pinned/unpinned state via its own
+> `aria-pressed`/`aria-label` (CP-62/CP-63), so a second announcement on the badge would be
+> redundant. Not retired (§7.5) since it was never assigned copy; do not reuse.
+
 ### 7.4 Popup — Settings View *(new in v2.0)*
 
 | ID | Element | Copy |
@@ -699,7 +705,7 @@ The single source of truth for all user-facing text.
 | Remove control | Keyboard-focusable even though revealed on hover; never hover-only |
 | Pin control *(v3.0)* | Keyboard-focusable even though revealed on hover; never hover-only. `aria-pressed` reflects state; `aria-label` announces the action that will result (CP-62/CP-63), not just a static name |
 | Pinned badge *(v3.0)* | `aria-hidden="true"` — decorative once the pin control's own accessible name already conveys state; not a duplicate announcement |
-| Pin limit message *(v3.0)* | Announced via `aria-live="polite"`, matching the existing confirmation-copy pattern below |
+| Pin limit message *(v3.0)* | Visually inserted inline (CP-65) where the pin control sat, auto-removed after ~2.5s. Announced via `role="status"`/`aria-live="polite"` — see D-097 |
 | Thumbnails | `alt=""` — decorative; the adjacent title carries the meaning |
 | Settings controls | Segmented groups use `role="radiogroup"` with `aria-checked`; toggles use `role="switch"` |
 | Setting helper text | Associated with its control via `aria-describedby` |

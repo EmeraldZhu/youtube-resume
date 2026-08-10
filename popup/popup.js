@@ -67,12 +67,14 @@ document.addEventListener('DOMContentLoaded', async () => {
   const listEl = document.getElementById('video-list');
   const emptyStateEl = document.getElementById('empty-state');
   const confirmCountEl = document.getElementById('confirm-count');
+  const confirmPinnedNoteEl = document.getElementById('confirm-pinned-note');
   const clearBtn = document.getElementById('clear-btn');
   const confirmPanel = document.getElementById('confirm-panel');
   const cancelBtn = document.getElementById('cancel-btn');
   const confirmBtn = document.getElementById('confirm-btn');
 
   let entryCount = 0;
+  let pinnedCount = 0;
   let loadThumbnails = true;
 
   function updateCount(n) {
@@ -139,6 +141,8 @@ document.addEventListener('DOMContentLoaded', async () => {
     pinBtn.classList.add('hidden');
     const msg = document.createElement('div');
     msg.className = 'pin-cap-message';
+    msg.setAttribute('role', 'status');
+    msg.setAttribute('aria-live', 'polite');
     msg.textContent = 'You can pin up to 20 videos';
     li.appendChild(msg);
     setTimeout(() => {
@@ -258,6 +262,7 @@ document.addEventListener('DOMContentLoaded', async () => {
       }
       entry.pinned = willPin;
       li.dataset.pinned = willPin ? 'true' : 'false';
+      pinnedCount += willPin ? 1 : -1;
       updatePinButton(pinBtn, willPin);
       updatePinBadge(thumbWrap, willPin);
       moveRowToSortedPosition(li, willPin, entry.updated);
@@ -276,6 +281,7 @@ document.addEventListener('DOMContentLoaded', async () => {
         console.warn('[YTResume] Failed to delete entry:', err);
         return;
       }
+      if (entry.pinned) pinnedCount -= 1;
       li.remove();
       updateCount(entryCount - 1);
     });
@@ -302,6 +308,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     entries.forEach(([videoId, entry]) => {
       listEl.appendChild(buildRow(videoId, entry));
     });
+    pinnedCount = entries.filter(([, entry]) => entry.pinned).length;
     updateCount(entries.length);
   } catch (err) {
     console.warn('[YTResume] Failed to read storage:', err);
@@ -313,6 +320,18 @@ document.addEventListener('DOMContentLoaded', async () => {
     if (entryCount === 0) return;
 
     confirmCountEl.textContent = entryCount;
+    // UX Spec §6.6 / CP-66 / CP-67 / D-080: pinning protects only against
+    // the 200-entry eviction cap, not this explicit clear-all action, so a
+    // user with pinned videos must be told they're included before confirming.
+    if (pinnedCount > 0) {
+      confirmPinnedNoteEl.textContent =
+        pinnedCount === 1
+          ? 'This includes 1 pinned video.'
+          : `This includes ${pinnedCount} pinned videos.`;
+      confirmPinnedNoteEl.classList.remove('hidden');
+    } else {
+      confirmPinnedNoteEl.classList.add('hidden');
+    }
     clearBtn.classList.add('hidden');
     confirmPanel.classList.remove('hidden');
   });
@@ -326,6 +345,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     try {
       await storageManager.clearAllProgress();
       listEl.replaceChildren();
+      pinnedCount = 0;
       updateCount(0);
     } catch (err) {
       console.warn('[YTResume] Failed to clear storage:', err);

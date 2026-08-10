@@ -107,9 +107,10 @@
       <div class="section action-row" id="clear-container">
         <button id="clear-btn" class="btn-ghost">Clear saved progress</button>
 
-        <div id="confirm-panel" class="confirm-panel hidden">
+        <div id="confirm-panel" class="confirm-panel hidden" role="status" aria-live="polite">
           <p class="confirm-text">Clear all saved resume data?</p>
           <p class="confirm-subtext">This will remove resume positions for all <span id="confirm-count">0</span> saved videos. This cannot be undone.</p>
+          <p id="confirm-pinned-note" class="confirm-subtext hidden"></p>
           <div class="confirm-actions">
             <button id="cancel-btn" class="btn-ghost btn-cancel">Cancel</button>
             <button id="confirm-btn" class="btn-danger">Clear</button>
@@ -120,7 +121,7 @@
       <div class="section action-row" id="reset-container">
         <button id="reset-btn" class="btn-ghost">Reset to defaults</button>
 
-        <div id="reset-confirm-panel" class="confirm-panel hidden">
+        <div id="reset-confirm-panel" class="confirm-panel hidden" role="status" aria-live="polite">
           <p class="confirm-text">Reset all settings to their defaults?</p>
           <div class="confirm-actions">
             <button id="reset-cancel-btn" class="btn-ghost btn-cancel">Cancel</button>
