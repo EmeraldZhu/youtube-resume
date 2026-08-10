@@ -12,24 +12,28 @@
  *     (rejects if videoId is not a plausible YouTube video ID shape — v3 Phase 2, D-065/2.3)
  *   storageManager.deleteProgress(videoId) → Promise<void>
  *   storageManager.clearAllProgress()      → Promise<void>
+ *   storageManager.pinProgress(videoId)    → Promise<void> (v3 Phase 4)
+ *     (rejects if no entry exists, or the 20-pin cap is already reached — never auto-unpins)
+ *   storageManager.unpinProgress(videoId)  → Promise<void> (v3 Phase 4)
  *   storageManager.getSettings()           → Promise<Settings>
  *   storageManager.saveSettings(partial)   → Promise<Settings>
  *   storageManager.resetSettings()         → Promise<Settings>
  *   storageManager.getDefaultSettings()    → Settings (sync, no storage access)
  *
  * Types:
- *   VideoProgress = { time: number, duration: number, updated: number, title?: string, channel?: string }
+ *   VideoProgress = { time: number, duration: number, updated: number, title?: string, channel?: string, pinned?: boolean }
  *
- * Storage shape (schema v2):
+ * Storage shape (schema v3):
  *   {
  *     youtubeResume: { [videoId]: VideoProgress },
  *     youtubeResumeSettings: Settings,
- *     youtubeResumeSchema: 2
+ *     youtubeResumeSchema: 3
  *   }
  *
  * youtubeResumeSchema and youtubeResumeSettings are separate root keys,
  * never nested inside youtubeResume — its keys are counted for the
- * 200-entry eviction cap (D-013).
+ * 200-entry eviction cap (D-013). Pinned entries (v3 Phase 4) are exempt
+ * from that cap — see saveProgress's eviction step below.
  */
 
 const storageManager = (() => {
@@ -38,7 +42,8 @@ const storageManager = (() => {
   const SETTINGS_KEY = 'youtubeResumeSettings';
   const MAX_ENTRIES = 200;
   const MAX_TITLE_LENGTH = 200;
-  const CURRENT_SCHEMA_VERSION = 2;
+  const MAX_PINNED = 20; // v3 Phase 4, D-067 — refused past this, never auto-unpinned
+  const CURRENT_SCHEMA_VERSION = 3;
 
   const DEFAULT_SETTINGS = {
     minWatchSeconds: 30,
@@ -66,18 +71,24 @@ const storageManager = (() => {
    * Migration chain (Roadmap v3 Phase 2, D-068). Each step is keyed by the
    * schema version it advances the store TO, and each is independently
    * idempotent — safe to re-run from any starting version, including one
-   * already at or past a step's target. This phase does not introduce a
-   * new schema version (D-071/CURRENT_SCHEMA_VERSION stays 2) — the chain
-   * has exactly one step today so Phase 4 can append a v2->v3 step without
-   * changing this shape or re-deriving idempotency from scratch.
+   * already at or past a step's target. Phase 4 (D-071) is the only place
+   * that introduces schema v3 (pinned) — appending its step below did not
+   * require changing this chain's shape or re-deriving idempotency.
    */
   const MIGRATION_STEPS = [
     {
-      to: CURRENT_SCHEMA_VERSION,
+      to: 2,
       // v1 -> v2 is purely additive (PRD §7.6): title became optional, so
       // every existing youtubeResume entry is already valid under v2
       // as-is. No entry transform runs here — only the schema version
       // (below) and default settings advance.
+      async run() {},
+    },
+    {
+      to: 3,
+      // v2 -> v3 (Roadmap v3 Phase 4, D-068/D-071) adds optional `pinned`,
+      // defaulting to absent = unpinned. Purely additive — no existing
+      // entry needs a rewrite, so this step is also a no-op.
       async run() {},
     },
   ];
@@ -304,13 +315,20 @@ const storageManager = (() => {
     // display-only metadata on that entry — never fall back into this key,
     // never participate in an equality check, never get hashed/concatenated
     // into it. Do not reintroduce them into the key path here.
+    // A save never changes an existing entry's pinned state.
+    if (existing?.pinned) {
+      entry.pinned = true;
+    }
+
     store[videoId] = entry;
 
-    // Eviction: trim to MAX_ENTRIES before writing
-    const keys = Object.keys(store);
-    if (keys.length > MAX_ENTRIES) {
-      const sorted = keys.sort((a, b) => store[a].updated - store[b].updated);
-      const toRemove = sorted.slice(0, keys.length - MAX_ENTRIES);
+    // Eviction: trim to MAX_ENTRIES, counting and selecting from unpinned
+    // entries only (Roadmap v3 4.3, D-067) — a pinned entry never counts
+    // toward the cap and is never a candidate for removal by it.
+    const unpinnedKeys = Object.keys(store).filter((k) => !store[k].pinned);
+    if (unpinnedKeys.length > MAX_ENTRIES) {
+      const sorted = unpinnedKeys.sort((a, b) => store[a].updated - store[b].updated);
+      const toRemove = sorted.slice(0, unpinnedKeys.length - MAX_ENTRIES);
       toRemove.forEach(k => delete store[k]);
     }
 
@@ -338,8 +356,55 @@ const storageManager = (() => {
   }
 
   /**
-   * Removes all saved progress entries. Leaves youtubeResumeSettings
-   * and youtubeResumeSchema untouched (PRD §7.4).
+   * Pins an existing entry (Roadmap v3 Phase 4). Rejects if no entry
+   * exists for videoId, or if MAX_PINNED is already reached — a pin
+   * attempt past the cap is refused outright, never auto-unpinning an
+   * existing pin to make room (D-067). No-op if the entry is already
+   * pinned.
+   */
+  async function pinProgress(videoId) {
+    assertStorageAvailable();
+    const result = await chrome.storage.local.get(STORAGE_KEY);
+    const store = result[STORAGE_KEY] ?? {};
+    const entry = store[videoId];
+    if (!entry) {
+      const message = `pinProgress rejected: no entry for videoId (${JSON.stringify(videoId)})`;
+      console.warn('[YTResume]', message);
+      throw new Error(message);
+    }
+    if (entry.pinned) return;
+
+    const pinnedCount = Object.values(store).filter((e) => e.pinned).length;
+    if (pinnedCount >= MAX_PINNED) {
+      const message = `pinProgress rejected: pin cap (${MAX_PINNED}) reached`;
+      console.warn('[YTResume]', message);
+      throw new Error(message);
+    }
+
+    store[videoId] = { ...entry, pinned: true };
+    await chrome.storage.local.set({ [STORAGE_KEY]: store });
+  }
+
+  /**
+   * Unpins an entry. No-op if the entry is absent or already unpinned —
+   * unpinning is never a rejection case.
+   */
+  async function unpinProgress(videoId) {
+    assertStorageAvailable();
+    const result = await chrome.storage.local.get(STORAGE_KEY);
+    const store = result[STORAGE_KEY] ?? {};
+    const entry = store[videoId];
+    if (!entry || !entry.pinned) return;
+
+    store[videoId] = { ...entry, pinned: false };
+    await chrome.storage.local.set({ [STORAGE_KEY]: store });
+  }
+
+  /**
+   * Removes all saved progress entries, pinned or not (Roadmap v3 4.5) —
+   * pinning protects only against the 200-entry eviction cap, not against
+   * this explicit user action. Leaves youtubeResumeSettings and
+   * youtubeResumeSchema untouched (PRD §7.4).
    */
   async function clearAllProgress() {
     assertStorageAvailable();
@@ -402,6 +467,8 @@ const storageManager = (() => {
     saveProgress,
     deleteProgress,
     clearAllProgress,
+    pinProgress,
+    unpinProgress,
     getSettings,
     saveSettings,
     resetSettings,

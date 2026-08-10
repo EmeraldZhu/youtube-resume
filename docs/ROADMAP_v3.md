@@ -665,25 +665,25 @@ field to).
 
 ### Tasks
 
-- [ ] 4.1 — **Schema v3.** `VideoProgress` gains an optional `pinned: boolean`, defaulting `false`
+- [x] 4.1 — **Schema v3.** `VideoProgress` gains an optional `pinned: boolean`, defaulting `false`
   (i.e. absent = unpinned; existing entries need no rewrite). This phase is the **only** place in the
   release that bumps `youtubeResumeSchema`, from 2 to 3 — the first real use of the version-aware
   chain mechanism Phase 2.1 built (which itself introduced no new version). This ordering is what
   keeps Phases 0–3 independently releasable at schema v2 (§3): nothing before this task ever writes
   or advertises a v3 shape.
-- [ ] 4.2 — `storageManager` gains `pinProgress(videoId)` and `unpinProgress(videoId)`. Pinning a 21st
+- [x] 4.2 — `storageManager` gains `pinProgress(videoId)` and `unpinProgress(videoId)`. Pinning a 21st
   entry is **refused** — the call rejects with a descriptive reason, and no existing pin is ever
   auto-unpinned to make room.
-- [ ] 4.3 — **Eviction respects pins.** The 200-entry eviction logic in `saveProgress()` excludes
+- [x] 4.3 — **Eviction respects pins.** The 200-entry eviction logic in `saveProgress()` excludes
   pinned entries from both the count subject to eviction and the eviction candidates themselves — the
   cap applies to unpinned entries only. Pinned entries never count toward, and never get removed by,
   the 200-entry cap.
-- [ ] 4.4 — `storageManager.getAllProgress()` continues to return the full map unchanged; callers
+- [x] 4.4 — `storageManager.getAllProgress()` continues to return the full map unchanged; callers
   (popup) read the `pinned` flag directly rather than storageManager filtering/sorting for them.
-- [ ] 4.5 — Confirm `clearAllProgress()` still removes all of `youtubeResume`, pinned or not — pinning
+- [x] 4.5 — Confirm `clearAllProgress()` still removes all of `youtubeResume`, pinned or not — pinning
   protects against the 200-cap, not against an explicit user "clear all" action. This is a deliberate
   scope boundary, logged as a decision, not an oversight.
-- [ ] 4.6 — Every new/touched promise chain ends in `.catch()`.
+- [x] 4.6 — Every new/touched promise chain ends in `.catch()`.
 
 ### Tests
 
@@ -700,14 +700,51 @@ field to).
 
 ### Exit Criteria
 
-- [ ] T4.1–T4.8 all pass
-- [ ] No test results in more than 20 pinned entries existing simultaneously
-- [ ] No test results in a pinned entry being evicted by the 200-cap logic
+- [x] T4.1–T4.8 all pass
+- [x] No test results in more than 20 pinned entries existing simultaneously
+- [x] No test results in a pinned entry being evicted by the 200-cap logic
 
 ### Docs to Update
 
-- TDD §4.6 (schema v3, pin cap, eviction exemption), §7.3, §7.5, §7.6
+- TDD §4.6 (schema v3, pin cap, eviction exemption)
 - PRD §7.3, §7.5
+
+---
+
+## Phase 4 Findings
+
+No DOM/UI surface changes this phase (that's Phase 5), so verification ran as a Node `vm` harness
+loading the real, unmodified `storage/storageManager.js` against a mocked `chrome.storage.local` —
+same file the extension ships, exercised through its actual public API rather than reimplemented
+test logic.
+
+**T4.1/T4.7/T4.8 — migration.** A schema-2 profile with two existing entries (one with a title)
+advanced cleanly to schema 3 with both entries intact and neither carrying `pinned: true`. A
+schema-1 profile (Phase-2-era chain present, v3 step never run) also advanced cleanly to 3 in one
+pass, with the existing entry byte-identical except for the schema key, and `pinProgress` usable on
+it immediately with no separate manual step. Reloading a schema-1 profile through the module five
+times in a row left the schema at 3 and the entry untouched after the first load — the later four
+were no-ops.
+
+**T4.2/T4.3 — pin cap.** Pinning 20 distinct entries in sequence succeeded for all 20; pinning a
+21st was rejected (thrown/logged, not silently dropped) and the 20 existing pins were unchanged
+afterward — confirmed by re-reading the store, not just by the rejection itself.
+
+**T4.4 — eviction exemption.** A store seeded with 20 pinned entries and 200 unpinned entries, then
+one more `saveProgress` for a brand-new 201st unpinned video: all 20 pinned entries survived, the new
+entry survived, and the unpinned count stayed at ≤200 (exactly 200, oldest-by-`updated` unpinned
+entry removed) — a pinned entry was never a candidate for that removal.
+
+**T4.5 — unpin/re-pin cycling.** Unpinning one of 20 pinned entries then pinning a previously-blocked
+21st candidate succeeded, and the pinned count returned to exactly 20.
+
+**T4.6 — clear-all still removes pins.** `clearAllProgress()` against a store containing a pinned
+entry removed `youtubeResume` entirely (pinned entry included) while leaving
+`youtubeResumeSettings`/`youtubeResumeSchema` untouched — matching 4.5's deliberate scope boundary
+(pinning protects against the 200-cap only, not an explicit clear-all).
+
+**Doc-numbering fix (D-094):** this phase's own "Docs to Update" line repeated the exact TDD/PRD
+section-number mixup D-089 already caught and fixed for Phase 2 — corrected in the same pass.
 
 ---
 

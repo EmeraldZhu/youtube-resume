@@ -13,7 +13,7 @@
 | 1 | Identity Hardening | DONE | — |
 | 2 | Storage Integrity | AWAITING VERIFICATION | — |
 | 3 | Resume Gate & Write Protection | AWAITING VERIFICATION | — |
-| 4 | Pinning Data Layer | NOT STARTED | — |
+| 4 | Pinning Data Layer | AWAITING VERIFICATION | — |
 | 5 | Pinning UI | NOT STARTED | — |
 | 6 | Doc Reconciliation, Regression & Store Release | NOT STARTED | — |
 | — | `docs/ROADMAP_v3.md` (latest revision: task 0.0 rewritten headless-first (owner pastes one storage export), 0.0-vs-T0.8 evidence-precedence table, T0.6 baseline fix) | AWAITING VERIFICATION | — |
@@ -26,8 +26,9 @@ ROADMAP_v3.md's "Phase 0 Findings"): defect A not reproduced, defect B primary (
 **refuted** — 0.0's live export of the owner's real profile found no legacy key, and no code path has
 ever existed to reimport one (outcome (b) of D-082's evidence table) — defect B secondary
 (title-identity) not reproduced, defect C **confirmed** (`saveProgress()` overwrites unconditionally,
-no guard). Schema v3 (`pinned` field) is introduced **only in Phase 4** (D-071). PRD §5.10 states
-defect fixes as symptom+guarantee only — mechanism stays with Phase 0/TDD.
+no guard). Schema v3 (`pinned` field) is introduced **only in Phase 4** (D-071) — landed this session,
+`CURRENT_SCHEMA_VERSION` now 3. PRD §5.10 states defect fixes as symptom+guarantee only — mechanism
+stays with Phase 0/TDD.
 
 ## Phase Status — v2.0.0 (shipped)
 
@@ -49,14 +50,18 @@ in-player UI (Phase 5), single-`setInterval` fix (D-059). Full history in `docs/
 
 ## Next action
 
-Phases 0/2/3 AWAITING VERIFICATION (owner review needed for Phase 0's visual-facing implications; 2
-and 3 self-verified live via `chrome-devtools-mcp`, no owner action needed — see ROADMAP_v3.md's
-"Phase N Findings" per phase). **Phase 1 DONE** (owner-confirmed). Phase 3: `progressTracker`
-disarms on load, arms only once `tryResume()` settles (D-066/D-091); one native-override re-assert
-(D-090); interval-only backward-jump write guard closes defect C structurally (D-090); Restart button
-needed and got an explicit baseline-reset call — a real false-positive bug found and fixed live
-(D-092), not just insurance. Phase 4 (pinning) next. **Drift fixed:** TDD §4.4/§4.5 now cover the
-arm/disarm gate and write guards; still stale on pinning and the rest of `debugLogger.js`.
+Phases 0/2/3/4 AWAITING VERIFICATION (owner review needed for Phase 0's visual-facing implications; 2,
+3, and 4 self-verified — 2/3 live via `chrome-devtools-mcp`, 4 via a Node `vm` harness against the real
+`storageManager.js` since it has no DOM/UI surface this phase — no owner action needed; see
+ROADMAP_v3.md's "Phase N Findings" per phase). **Phase 1 DONE** (owner-confirmed). Phase 3:
+`progressTracker` disarms on load, arms only once `tryResume()` settles (D-066/D-091); one
+native-override re-assert (D-090); interval-only backward-jump write guard closes defect C
+structurally (D-090); Restart button needed and got an explicit baseline-reset call — a real
+false-positive bug found and fixed live (D-092), not just insurance. Phase 4: schema bumped 2→3
+(D-071), `pinProgress`/`unpinProgress` added, 20-pin cap enforced with no auto-unpin (D-067), eviction
+now excludes pinned entries from both count and candidates, `clearAllProgress` still removes pins
+(T4.1–T4.8 all pass, D-093). Phase 5 (pinning UI) next. **Drift fixed:** TDD §4.4/§4.5/§4.6 now cover
+the arm/disarm gate, write guards, and pinning; TDD still stale on the rest of `debugLogger.js`.
 
 ## Doc versions
 

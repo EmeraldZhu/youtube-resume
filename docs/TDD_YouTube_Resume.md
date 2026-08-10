@@ -800,6 +800,9 @@ storageManager.saveProgress(videoId: string, time: number, duration: number, tit
 // rejects if videoId is not a plausible YouTube video ID shape — Roadmap v3 Phase 2, 2.3
 storageManager.deleteProgress(videoId: string): Promise<void>
 storageManager.clearAllProgress(): Promise<void>
+storageManager.pinProgress(videoId: string): Promise<void>   // v3 — Phase 4
+// rejects if no entry exists for videoId, or the 20-pin cap is already reached — never auto-unpins
+storageManager.unpinProgress(videoId: string): Promise<void> // v3 — Phase 4, no-op if absent/already unpinned
 storageManager.getSettings(): Promise<Settings>              // v2 — Phase 6
 storageManager.saveSettings(partial: Partial<Settings>): Promise<Settings>  // v2 — Phase 6
 storageManager.resetSettings(): Promise<Settings>             // v2 — Phase 6
@@ -815,6 +818,8 @@ type VideoProgress = {
   updated: number;    // Unix timestamp in seconds
   title?: string;     // v2 — optional, capped at 200 chars
   channel?: string;   // v2 (Phase 8 polish) — optional, capped at 200 chars
+  pinned?: boolean;   // v3 (Phase 4) — optional; absent/false = unpinned, so no
+                       // existing v2 entry needs a rewrite
 };
 
 type Settings = {
@@ -831,11 +836,12 @@ type StorageRoot = {
 };
 
 const STORAGE_KEY = 'youtubeResume';
-const SCHEMA_KEY = 'youtubeResumeSchema';        // v2 — root key, integer 2
+const SCHEMA_KEY = 'youtubeResumeSchema';        // v2 — root key, integer, now 3 (Phase 4)
 const SETTINGS_KEY = 'youtubeResumeSettings';    // v2 — root key
 const MAX_ENTRIES = 200;
 const MAX_TITLE_LENGTH = 200;                    // v2
-const CURRENT_SCHEMA_VERSION = 2;                // v2
+const MAX_PINNED = 20;                           // v3 (Phase 4, D-067) — refused past this, never auto-unpinned
+const CURRENT_SCHEMA_VERSION = 3;                // v3 (Phase 4, D-071) — bumped exclusively here
 ```
 
 `youtubeResumeSchema` and `youtubeResumeSettings` are separate root keys, never nested inside
@@ -933,19 +939,57 @@ async function saveProgress(videoId, time, duration, title, channel) {
   // Identity invariant (Roadmap v3 Phase 1): videoId is the sole identity
   // for a stored entry. title/channel above are refreshed display-only
   // metadata on that entry — never fall back into this key.
+  // A save never changes an existing entry's pinned state (v3 Phase 4).
+  if (existing?.pinned) entry.pinned = true;
   store[videoId] = entry;
 
-  // Eviction: trim to MAX_ENTRIES before writing
-  const keys = Object.keys(store);
-  if (keys.length > MAX_ENTRIES) {
-    const sorted = keys.sort((a, b) => store[a].updated - store[b].updated);
-    const toRemove = sorted.slice(0, keys.length - MAX_ENTRIES);
+  // Eviction (v3 Phase 4, D-067): trim to MAX_ENTRIES, counting and
+  // selecting from unpinned entries only — a pinned entry never counts
+  // toward the cap and is never a candidate for removal by it.
+  const unpinnedKeys = Object.keys(store).filter(k => !store[k].pinned);
+  if (unpinnedKeys.length > MAX_ENTRIES) {
+    const sorted = unpinnedKeys.sort((a, b) => store[a].updated - store[b].updated);
+    const toRemove = sorted.slice(0, unpinnedKeys.length - MAX_ENTRIES);
     toRemove.forEach(k => delete store[k]);
   }
 
   await chrome.storage.local.set({ [STORAGE_KEY]: store });
 }
 ```
+
+**`pinProgress(videoId)` / `unpinProgress(videoId)` (Roadmap v3 Phase 4):**
+
+```javascript
+async function pinProgress(videoId) {
+  const result = await chrome.storage.local.get(STORAGE_KEY);
+  const store = result[STORAGE_KEY] ?? {};
+  const entry = store[videoId];
+  if (!entry) throw new Error(`pinProgress rejected: no entry for videoId (${videoId})`);
+  if (entry.pinned) return; // already pinned, no-op
+
+  const pinnedCount = Object.values(store).filter(e => e.pinned).length;
+  if (pinnedCount >= MAX_PINNED) {
+    throw new Error(`pinProgress rejected: pin cap (${MAX_PINNED}) reached`);
+  }
+
+  store[videoId] = { ...entry, pinned: true };
+  await chrome.storage.local.set({ [STORAGE_KEY]: store });
+}
+
+async function unpinProgress(videoId) {
+  const result = await chrome.storage.local.get(STORAGE_KEY);
+  const store = result[STORAGE_KEY] ?? {};
+  const entry = store[videoId];
+  if (!entry || !entry.pinned) return; // no-op if absent or already unpinned
+
+  store[videoId] = { ...entry, pinned: false };
+  await chrome.storage.local.set({ [STORAGE_KEY]: store });
+}
+```
+
+A pin attempt past the 20-pin cap is refused outright — the promise rejects, logged the same way as
+any other storage rejection (§7.2), and no existing pin is ever auto-unpinned to make room (D-067).
+Unpinning is never a rejection case: absent or already-unpinned both no-op.
 
 **`deleteProgress(videoId)`:**
 
@@ -958,23 +1002,24 @@ async function deleteProgress(videoId) {
 }
 ```
 
-**`clearAllProgress()`:** removes `youtubeResume` only, via `chrome.storage.local.remove(STORAGE_KEY)`.
-`youtubeResumeSettings` and `youtubeResumeSchema` are untouched (PRD §7.4).
+**`clearAllProgress()`:** removes `youtubeResume` only, via `chrome.storage.local.remove(STORAGE_KEY)`,
+pinned or not (Roadmap v3 4.5) — pinning protects only against the 200-entry eviction cap, not against
+this explicit user action. `youtubeResumeSettings` and `youtubeResumeSchema` are untouched (PRD §7.4).
 
-#### Migration (v1 → v2, PRD §7.6; chain mechanism — Roadmap v3 Phase 2, D-068)
+#### Migration (v1 → v2 → v3, PRD §7.6; chain mechanism — Roadmap v3 Phase 2, D-068)
 
 Runs once, unconditionally, at module load (both content-script and popup contexts load this module,
 so whichever loads first performs it). As of Roadmap v3 Phase 2, migration is a **version-aware step
 chain** rather than a single "write current version if not equal" check: each step is keyed by the
 schema version it advances the store *to*, and each step is independently idempotent — safe to re-run
-from any starting version, including one already at or past that step's target. This phase does not
-introduce a new schema version (`CURRENT_SCHEMA_VERSION` stays `2`, D-071) — the chain has exactly one
-step today (v1 → v2, purely additive per PRD §7.6, no entry transform needed) so Phase 4 can append a
-v2 → v3 step without changing this shape:
+from any starting version, including one already at or past that step's target. Schema v3 (`pinned`) is
+introduced **exclusively in Phase 4** (D-071) — the chain's v2 step (Phase 2) never advertised or
+required a v3 shape, so Phases 0–3 alone stay releasable at schema v2:
 
 ```javascript
 const MIGRATION_STEPS = [
-  { to: CURRENT_SCHEMA_VERSION, async run() {} }, // v1 -> v2: purely additive, no entry transform
+  { to: 2, async run() {} }, // v1 -> v2: purely additive, no entry transform
+  { to: 3, async run() {} }, // v2 -> v3: adds optional `pinned`, absent = unpinned, no entry transform
 ];
 
 async function migrate() {
@@ -1049,6 +1094,9 @@ function repairStore(store) {
 - Callers must handle rejections — `storageManager` does not swallow errors internally
 - `saveProgress` also rejects for an unresolved `videoId` (Roadmap v3 2.3) — logged, not thrown
   uncaught; no entry is written
+- `pinProgress` rejects if no entry exists for `videoId`, or if the 20-pin cap is already reached
+  (Roadmap v3 4.2, D-067) — logged, not thrown uncaught; never auto-unpins to make room.
+  `unpinProgress` never rejects: absent or already-unpinned are both a silent no-op
 - `migrate()` and `repairDuplicates()` are the exceptions: both catch and log internally, since they
   run unsupervised at load time and must never block resume or tracking
 - `getProgress` returns `null` for any missing key — never throws on absence

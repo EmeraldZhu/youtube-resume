@@ -639,7 +639,7 @@ same video.
     "showRestartButton": true,
     "loadThumbnails": true
   },
-  "youtubeResumeSchema": 2
+  "youtubeResumeSchema": 3
 }
 ```
 
