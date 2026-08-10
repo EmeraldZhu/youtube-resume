@@ -10,12 +10,21 @@ Build plan: `docs/ROADMAP_v2.md`, 9 sequential phases.
 
 **Decide and keep going. Do not ask.**
 
-The owner is non-technical and running Auto Mode. A question they cannot judge costs more than a
-wrong decision you logged — wrong decisions surface at review; a stalled session doesn't. Your
-default is to pick the best option, record it, and continue. Silence is not caution here.
+The owner is a non-technical PM running Auto Mode. **Never ask the owner to read docs, diffs, or
+code** — that is not their job here and they cannot judge it. Their sole role is visual/UI testing
+you cannot do yourself (real Chrome profile, eyes-on rendering judgment). Loop them in only for
+that, or for a genuine STOP item below. A question they cannot judge costs more than a wrong
+decision you logged — wrong decisions surface at review; a stalled session doesn't. Your default is
+to pick the best option, record it, verify it yourself, and continue. Silence is not caution here.
 
 Decisions are recorded in `docs/DECISIONS.md` rather than escalated. That ledger is what makes
 high autonomy safe, so use it instead of asking.
+
+You have full rein to self-verify. Anything checkable without a real Chrome profile or human eyes —
+grepping the codebase, calling modules directly (headless Chrome via `chrome-devtools` MCP, the
+popup console, or equivalent), reading logged output — is yours to run and judge, not the owner's.
+Only escalate the specific checks that genuinely require the owner's own browser or their visual
+judgment.
 
 ### Decision tiers
 
@@ -60,18 +69,24 @@ Two files govern where work stands. Read both at the start of every phase, befor
 
 At the end of every phase:
 
-1. Set the phase to `AWAITING VERIFICATION` in the Phase Status table. **Never write `DONE` yourself** —
-   only the owner's confirmation moves a phase to `DONE`. Code that looks right is not done.
-2. Hand over a numbered verification checklist: what to click, what to expect, in order.
-3. Add a `DECISIONS.md` row for every Tier 2 and Tier 3 decision from the phase, with the phase that
+1. Run every test in the phase's test table yourself first — grep, headless Chrome, direct module
+   calls, whatever the check needs. Fix what fails; log what you decided.
+2. Add a `DECISIONS.md` row for every Tier 2 and Tier 3 decision from the phase, with the phase that
    implements it. A decision that exists only in your report is lost when the session ends.
-4. Move rows you acted on from `APPROVED` to `DONE`.
-5. Update the TDD sections the phase lists. A phase isn't finished until this is done.
+3. Move rows you acted on from `APPROVED` to `DONE`.
+4. Update the TDD sections the phase lists. A phase isn't finished until this is done.
+5. If self-verification is clean, **commit and push without asking** — the owner has pre-authorized
+   this for phase work. Use the standard `phase N: <what changed>` message.
+6. Set the phase to `AWAITING VERIFICATION` in the Phase Status table. **Never write `DONE` yourself** —
+   only the owner's confirmation moves a phase to `DONE`, and only their part is left to confirm.
+7. Hand the owner a short list of *only* the checks that genuinely need their own browser or eyes —
+   what to click, what to expect, in order. If a phase has no such check, say so plainly instead of
+   inventing one; don't ask them to review anything you already verified yourself.
 
 If an `OPEN` row owned by Human blocks the current phase, stop and name the ID. Don't guess past it.
 
-Stopping at a phase boundary for verification is a review gate, not a request for a decision. It is
-the one place slowing down is correct.
+Stopping at a phase boundary for the owner's visual checks is a review gate, not a request for a
+decision. It is the one place slowing down is correct — and only for the checks that need their eyes.
 
 ## Hard constraints — never violate; route around, don't ask
 
