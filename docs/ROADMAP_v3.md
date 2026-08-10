@@ -415,28 +415,28 @@ non-destructive — no entry is ever deleted by this phase's logic.
 
 ### Tasks
 
-- [ ] 2.1 — **Version-aware migration.** Replace the current "write current version if not equal"
+- [x] 2.1 — **Version-aware migration.** Replace the current "write current version if not equal"
   migration with a step-by-step chain (e.g. v1→v2) so each step's effect is explicit and idempotent
   independently, not just idempotent in aggregate. **This phase does not introduce a new schema
   version** — it leaves `youtubeResumeSchema` at its current value (2). Re-running migration at the
   current schema state must be a no-op beyond confirming the version is already current. Schema v3 is
   introduced exclusively in Phase 4, using the chain mechanism built here (see §3, independent-
   releasability: this keeps Phases 0–3 shippable without ever having advertised a v3 shape).
-- [ ] 2.2 — **Merge duplicates by video ID.** On extension load (or lazily, on next access), scan
+- [x] 2.2 — **Merge duplicates by video ID.** On extension load (or lazily, on next access), scan
   `youtubeResume` for any keys that do not look like a bare video ID (a defensive check, in case
   Phase 0 found a path that produced malformed keys) and merge any duplicates found for the same
   underlying video ID, keeping the entry with the **furthest position** (`time`) and the
   **most recent** `updated`/title/channel among the merged set. This task is a no-op if Phase 0 found
   no such malformed keys — implement it as a defensive repair pass regardless, since it is cheap and
   closes the failure class permanently.
-- [ ] 2.3 — **Reject unresolved video ID writes.** `storageManager.saveProgress()` must refuse
+- [x] 2.3 — **Reject unresolved video ID writes.** `storageManager.saveProgress()` must refuse
   (reject its promise, logged, not thrown to the caller uncaught) any call where `videoId` is
   falsy, empty, or not a plausible YouTube video ID shape. Callers (`progressTracker`) must already
   `.catch()` this per existing convention — no new UI, no user-visible error.
-- [ ] 2.4 — **Lazy title backfill.** If an entry has no `title` and the user revisits that same video,
+- [x] 2.4 — **Lazy title backfill.** If an entry has no `title` and the user revisits that same video,
   the existing save path (D-045's preserve-if-omitted logic) already backfills it — confirm this
   holds and add a test for it. No proactive re-fetch of titles for videos not being watched right now.
-- [ ] 2.5 — **Non-destructive guarantee, with one named exception.** No task in this phase may delete
+- [x] 2.5 — **Non-destructive guarantee, with one named exception.** No task in this phase may delete
   an entry from `youtubeResume`. Merging combines data into a single surviving entry; it never results
   in fewer distinct real videos represented than existed before, only fewer duplicate rows for the
   same video. **The one exception:** if Phase 0 confirmed the legacy-v1-reimport hypothesis for
@@ -446,7 +446,7 @@ non-destructive — no entry is ever deleted by this phase's logic.
   already-migrated legacy data that no longer has any effect if left alone except to be
   re-imported; it never deletes a v2 (or later v3) `youtubeResume` entry. If Phase 0 did not confirm
   the hypothesis, this exception is not implemented — there is nothing to remove.
-- [ ] 2.6 — Confirm `storage/storageManager.js` remains the only module touching `chrome.storage.local`.
+- [x] 2.6 — Confirm `storage/storageManager.js` remains the only module touching `chrome.storage.local`.
 
 ### Tests
 
@@ -464,14 +464,64 @@ non-destructive — no entry is ever deleted by this phase's logic.
 
 ### Exit Criteria
 
-- [ ] T2.1–T2.8 all pass (T2.9 also passes if applicable)
-- [ ] No test scenario results in a real video's saved progress being deleted
-- [ ] `youtubeResumeSchema` still reads `2` at the end of this phase — no version bump occurred here
+- [x] T2.1–T2.8 all pass (T2.9 not applicable — Phase 0 refuted the legacy-reimport hypothesis, see below)
+- [x] No test scenario results in a real video's saved progress being deleted
+- [x] `youtubeResumeSchema` still reads `2` at the end of this phase — no version bump occurred here
 
 ### Docs to Update
 
-- TDD §4.6 (migration chain, merge pass, rejection rule), §7.5, §7.6
+- TDD §4.6 (migration chain, merge pass, rejection rule, write-back guard)
 - PRD §7.6
+
+## Phase 2 Findings
+
+Executed against a clean automation profile (0 pre-existing entries) via `chrome-devtools-mcp`,
+driving the popup context directly (D-052's technique) — synthetic storage states were seeded and read
+back via `chrome.storage.local` from that context, and the extension's own popup-load cycle
+(`storageManager.js`'s top-level `migrate().then(repairDuplicates)`) was used to simulate repeated
+loads, matching Phase 0's 0.6/0.7 methodology.
+
+**D-070 dropped.** Per the amended task, legacy-key removal was not built. 0.0 found no legacy key on
+the owner's real profile and 0.5 found no code path in any shipped version that ever created one —
+both already recorded in D-085/D-070's own notes. T2.9 does not apply.
+
+**Read-path investigation (defect-B third hypothesis — "Untitled video" entries were real entries
+rendered without titles, not new ones).** Read `popup.js` in full: `getAllProgress()` and
+`getSettings()` are awaited via a single `Promise.all` before any row is built, and
+`storageManager.getAllProgress()` itself is one `chrome.storage.local.get(STORAGE_KEY)` call — Chrome's
+storage API returns a coherent snapshot of the requested key, never a partial/torn read of the object
+inside it. There is no code path in `popup.js` where rendering can begin before the read has fully
+resolved, and no second read that could disagree with it. The one theoretical interleaving —
+`storageManager.js`'s own load-time `migrate().then(repairDuplicates)` writing to `youtubeResume`
+concurrently with `popup.js`'s independent `getAllProgress()` call — can only make `popup.js`'s read
+land before or after that write, never mid-write; and `repairDuplicates` only merges duplicate rows
+(preserving titles, per 2.2's merge rule), never clears one. **Verdict: not reproduced, and no fourth
+hypothesis is proposed** — the read path has no structural mechanism that could produce a rendered
+entry with an absent title while the underlying stored entry is intact.
+
+**Write-back guard (ships regardless of the read-path finding, per the task).** D-045's
+preserve-if-omitted logic already covers every save trigger structurally — all six triggers
+(interval/pause/seeked/ended/visibility/pagehide) funnel through the single
+`progressTracker.attemptSave` → `storageManager.saveProgress()` call site, so one guard covers all of
+them by construction; there is no second call site that could bypass it. Verified directly against the
+built extension: `saveProgress` called twice for the same ID, second call omitting title/channel with
+`null`, `undefined`, and `''` — all three preserved the existing title/channel unchanged. **Gap found
+and closed:** a whitespace-only string (`'   '`) was truthy under the original `title ? … : existing`
+check, so it was *not* treated as omitted — it overwrote a real stored title with blank-looking text.
+`youtubeUtils.getTitle()`/`getChannelName()` never produce that today (both trim and null out on
+failure), so this was unreachable via real playback, but the guard itself needed to be robust to it
+independent of the caller. Fixed by trimming before the truthiness check in both `saveProgress` and the
+new merge pass's title/channel selection; re-verified live after the fix — the same whitespace-only
+call now correctly preserves the existing title/channel. Logged as D-087.
+
+**Duplicate merge / rejection tests, live:** T2.2 (two entries for one video ID, times 100 and 400) →
+one surviving entry, `time: 400`. T2.3 (one entry titled, one not, for one video ID) → surviving entry
+retains the title. T2.7 (a lone untouched entry alongside the above) → byte-identical after the repair
+pass. T2.1 (5 sequential loads from schema v2) → no change after the first repair; schema reads `2` on
+every load. T2.4/T2.5 (`saveProgress` with `''` / `undefined` videoId) → both rejected, logged, no entry
+written; a malformed-shape ID (`'short'`) was also tried and rejected, beyond the two literally
+specified cases. All test data removed from the automation profile after verification; it carried no
+real entries before or after.
 
 ---
 

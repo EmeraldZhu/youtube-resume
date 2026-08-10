@@ -747,6 +747,7 @@ the popup, which loads this module too as of Phase 4).
 storageManager.getProgress(videoId: string): Promise<VideoProgress | null>
 storageManager.getAllProgress(): Promise<Record<string, VideoProgress>>
 storageManager.saveProgress(videoId: string, time: number, duration: number, title?: string, channel?: string): Promise<void>
+// rejects if videoId is not a plausible YouTube video ID shape — Roadmap v3 Phase 2, 2.3
 storageManager.deleteProgress(videoId: string): Promise<void>
 storageManager.clearAllProgress(): Promise<void>
 storageManager.getSettings(): Promise<Settings>              // v2 — Phase 6
@@ -834,8 +835,18 @@ async function getAllProgress() {
 
 **`saveProgress(videoId, time, duration, title, channel)`:**
 
+Rejects outright (Roadmap v3 2.3) if `videoId` isn't a plausible YouTube video ID shape (an 11-char
+`[A-Za-z0-9_-]` token) — no entry is written, no `chrome.storage.local` call is made. Callers already
+end this call in `.catch()` (`progressTracker.attemptSave`'s existing convention), so this surfaces as
+a logged, silently-handled rejection, never an uncaught error.
+
 ```javascript
 async function saveProgress(videoId, time, duration, title, channel) {
+  if (!isValidVideoId(videoId)) {
+    console.warn('[YTResume]', `saveProgress rejected: unresolved videoId (${JSON.stringify(videoId)})`);
+    throw new Error(`saveProgress rejected: unresolved videoId (${JSON.stringify(videoId)})`);
+  }
+
   const result = await chrome.storage.local.get(STORAGE_KEY);
   const store = result[STORAGE_KEY] ?? {};
   const existing = store[videoId];
@@ -850,12 +861,21 @@ async function saveProgress(videoId, time, duration, title, channel) {
   // stored value rather than erasing it (D-016/D-045). channel has no
   // document.title fallback (D-056), so a transient DOM-selector miss on
   // it is more likely, not less — the same preserve-if-omitted rule covers it.
-  const resolvedTitle = title ? title.slice(0, MAX_TITLE_LENGTH) : existing?.title;
+  // A whitespace-only string counts as omitted too (Roadmap v3 2.4
+  // write-back guard, D-087) — a bare truthy check would let it through
+  // and overwrite a real stored value with blank-looking text. Every save
+  // trigger (interval/pause/seeked/ended/visibility/pagehide) funnels
+  // through this one function via progressTracker.attemptSave, so the
+  // guard covers all of them by construction — there is no second call
+  // site that could bypass it.
+  const trimmedTitle = typeof title === 'string' ? title.trim() : '';
+  const resolvedTitle = trimmedTitle ? trimmedTitle.slice(0, MAX_TITLE_LENGTH) : existing?.title;
   if (resolvedTitle) {
     entry.title = resolvedTitle;
   }
 
-  const resolvedChannel = channel ? channel.slice(0, MAX_TITLE_LENGTH) : existing?.channel;
+  const trimmedChannel = typeof channel === 'string' ? channel.trim() : '';
+  const resolvedChannel = trimmedChannel ? trimmedChannel.slice(0, MAX_TITLE_LENGTH) : existing?.channel;
   if (resolvedChannel) {
     entry.channel = resolvedChannel;
   }
@@ -891,21 +911,36 @@ async function deleteProgress(videoId) {
 **`clearAllProgress()`:** removes `youtubeResume` only, via `chrome.storage.local.remove(STORAGE_KEY)`.
 `youtubeResumeSettings` and `youtubeResumeSchema` are untouched (PRD §7.4).
 
-#### Migration (v1 → v2, PRD §7.6)
+#### Migration (v1 → v2, PRD §7.6; chain mechanism — Roadmap v3 Phase 2, D-068)
 
 Runs once, unconditionally, at module load (both content-script and popup contexts load this module,
-so whichever loads first performs it). Idempotent and purely additive — never rewrites, reorders, or
-deletes an existing `youtubeResume` entry:
+so whichever loads first performs it). As of Roadmap v3 Phase 2, migration is a **version-aware step
+chain** rather than a single "write current version if not equal" check: each step is keyed by the
+schema version it advances the store *to*, and each step is independently idempotent — safe to re-run
+from any starting version, including one already at or past that step's target. This phase does not
+introduce a new schema version (`CURRENT_SCHEMA_VERSION` stays `2`, D-071) — the chain has exactly one
+step today (v1 → v2, purely additive per PRD §7.6, no entry transform needed) so Phase 4 can append a
+v2 → v3 step without changing this shape:
 
 ```javascript
+const MIGRATION_STEPS = [
+  { to: CURRENT_SCHEMA_VERSION, async run() {} }, // v1 -> v2: purely additive, no entry transform
+];
+
 async function migrate() {
   try {
     const result = await chrome.storage.local.get([SCHEMA_KEY, SETTINGS_KEY]);
+    let version = result[SCHEMA_KEY] ?? 1;
     const toWrite = {};
 
-    if (result[SCHEMA_KEY] !== CURRENT_SCHEMA_VERSION) {
-      toWrite[SCHEMA_KEY] = CURRENT_SCHEMA_VERSION;
+    for (const step of MIGRATION_STEPS) {
+      if (version < step.to) {
+        await step.run();
+        version = step.to;
+        toWrite[SCHEMA_KEY] = version;
+      }
     }
+
     if (!result[SETTINGS_KEY]) {
       toWrite[SETTINGS_KEY] = { ...DEFAULT_SETTINGS };
     }
@@ -920,12 +955,52 @@ async function migrate() {
 ```
 
 A migration failure logs a warning and the extension continues with in-memory defaults — it never
-blocks resume or tracking.
+blocks resume or tracking. Never rewrites, reorders, or deletes an existing `youtubeResume` entry.
+
+#### Duplicate repair pass (Roadmap v3 Phase 2.2)
+
+Runs once per load, chained after `migrate()` resolves (`migrate().then(repairDuplicates)`): scans
+`youtubeResume` for keys that don't look like a bare 11-char video ID and merges any duplicates found
+for the same underlying video ID. Purely defensive — Phase 0 found no evidence any malformed key has
+ever been produced by shipped code (see Roadmap v3 "Phase 0 Findings"), but the pass is cheap enough to
+run unconditionally and closes the failure class regardless.
+
+- A key already shaped like a video ID is its own canonical ID.
+- A malformed key with exactly one embedded 11-char ID-shaped substring resolves to that ID; a key
+  with zero or more-than-one candidate is left in place, unresolved and untouched — 2.5's
+  non-destructive rule forbids deleting *any* entry, resolved or not, so an ambiguous key is never
+  guessed at or dropped.
+- When two entries resolve to the same canonical ID, they're merged: the **furthest** `time` wins
+  (paired with its own `duration`), the **most recently `updated`** entry's `title`/`channel` win,
+  falling back to the other entry's value if the more recent one is blank (same preserve-if-omitted
+  spirit as `saveProgress`, including the whitespace-only guard below).
+- The repaired store is written back only if something actually changed — no-op, no write, if the
+  store has no malformed/duplicate keys (T2.7).
+
+```javascript
+function repairStore(store) {
+  const merged = {};
+  let changed = false;
+  for (const [key, entry] of Object.entries(store)) {
+    if (!entry || typeof entry !== 'object') continue;
+    const canonicalId = resolveVideoId(key); // null if unresolved
+    if (!canonicalId) { merged[key] = entry; continue; }
+    if (canonicalId !== key) changed = true;
+    const existing = merged[canonicalId];
+    merged[canonicalId] = existing ? mergeEntryPair(existing, entry) : entry;
+    if (existing) changed = true;
+  }
+  return { store: merged, changed };
+}
+```
 
 #### Error Behavior
 - All methods are `async` and will reject if `chrome.storage.local` is unavailable
 - Callers must handle rejections — `storageManager` does not swallow errors internally
-- `migrate()` is the one exception: it catches and logs internally, since it runs unsupervised at load time
+- `saveProgress` also rejects for an unresolved `videoId` (Roadmap v3 2.3) — logged, not thrown
+  uncaught; no entry is written
+- `migrate()` and `repairDuplicates()` are the exceptions: both catch and log internally, since they
+  run unsupervised at load time and must never block resume or tracking
 - `getProgress` returns `null` for any missing key — never throws on absence
 
 #### Settings API (v2 — Phase 6)

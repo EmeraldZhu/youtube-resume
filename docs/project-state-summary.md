@@ -11,7 +11,7 @@
 |---|---|---|---|
 | 0 | Defect Diagnosis & Instrumentation | AWAITING VERIFICATION | — |
 | 1 | Identity Hardening | DONE | — |
-| 2 | Storage Integrity | NOT STARTED | — |
+| 2 | Storage Integrity | AWAITING VERIFICATION | — |
 | 3 | Resume Gate & Write Protection | NOT STARTED | — |
 | 4 | Pinning Data Layer | NOT STARTED | — |
 | 5 | Pinning UI | NOT STARTED | — |
@@ -50,12 +50,14 @@ in-player UI (Phase 5), single-`setInterval` fix (D-059). Full history in `docs/
 ## Next action
 
 Phase 0 AWAITING VERIFICATION (owner review needed — see ROADMAP_v3.md "Phase 0 Findings"). **Phase 1
-DONE** (owner-confirmed) — identity invariant already held everywhere (no bug found, matching D-064);
-added a structural guard (code comment + doc sections) so it can't regress. Phase 2's non-destructive
-migration-chain work proceeds next, but D-070's legacy-key-deletion exception now has no confirmed
-target and will not fire; Phase 3 is squarely justified — defect C is confirmed. **Drift fixed:** TDD
-§4.6/§7.3 now cover the identity invariant; TDD still otherwise reads 2.0.0 and doesn't yet cover
-defects B/C, pinning, or the rest of `debugLogger.js` — continue closing this through Phase 2+.
+DONE** (owner-confirmed). **Phase 2 AWAITING VERIFICATION** — self-verified live via
+`chrome-devtools-mcp` (see ROADMAP_v3.md "Phase 2 Findings"): migration chain, duplicate-merge, and
+unresolved-videoId rejection all pass T2.1–T2.8; D-070 dropped (no legacy key exists, retired);
+read-path investigation for defect B's third hypothesis found nothing reproducible (D-088); a
+whitespace-only-title write-back gap was found and closed (D-087). No owner action needed — nothing
+in this phase needed a real browser or eyes. Phase 3 next — defect C is confirmed. **Drift fixed:**
+TDD §4.6 now covers Phase 2's migration/merge/rejection/write-back logic too; still stale on pinning
+and the rest of `debugLogger.js`.
 
 ## Doc versions
 

@@ -9,6 +9,7 @@
  *   storageManager.getProgress(videoId)    → Promise<VideoProgress | null>
  *   storageManager.getAllProgress()        → Promise<Record<string, VideoProgress>>
  *   storageManager.saveProgress(videoId, time, duration, title?, channel?) → Promise<void>
+ *     (rejects if videoId is not a plausible YouTube video ID shape — v3 Phase 2, D-065/2.3)
  *   storageManager.deleteProgress(videoId) → Promise<void>
  *   storageManager.clearAllProgress()      → Promise<void>
  *   storageManager.getSettings()           → Promise<Settings>
@@ -62,19 +63,45 @@ const storageManager = (() => {
   }
 
   /**
-   * v1 -> v2 migration (PRD §7.6). Purely additive: writes the schema
-   * version and default settings if missing, and never touches existing
-   * youtubeResume entries. Idempotent — safe to run on every load.
+   * Migration chain (Roadmap v3 Phase 2, D-068). Each step is keyed by the
+   * schema version it advances the store TO, and each is independently
+   * idempotent — safe to re-run from any starting version, including one
+   * already at or past a step's target. This phase does not introduce a
+   * new schema version (D-071/CURRENT_SCHEMA_VERSION stays 2) — the chain
+   * has exactly one step today so Phase 4 can append a v2->v3 step without
+   * changing this shape or re-deriving idempotency from scratch.
+   */
+  const MIGRATION_STEPS = [
+    {
+      to: CURRENT_SCHEMA_VERSION,
+      // v1 -> v2 is purely additive (PRD §7.6): title became optional, so
+      // every existing youtubeResume entry is already valid under v2
+      // as-is. No entry transform runs here — only the schema version
+      // (below) and default settings advance.
+      async run() {},
+    },
+  ];
+
+  /**
+   * Runs every migration step whose target version is still ahead of the
+   * stored version, writes default settings if missing, and never touches
+   * existing youtubeResume entries. Idempotent — safe to run on every load.
    */
   async function migrate() {
     try {
       assertStorageAvailable();
       const result = await chrome.storage.local.get([SCHEMA_KEY, SETTINGS_KEY]);
+      let version = result[SCHEMA_KEY] ?? 1;
       const toWrite = {};
 
-      if (result[SCHEMA_KEY] !== CURRENT_SCHEMA_VERSION) {
-        toWrite[SCHEMA_KEY] = CURRENT_SCHEMA_VERSION;
+      for (const step of MIGRATION_STEPS) {
+        if (version < step.to) {
+          await step.run();
+          version = step.to;
+          toWrite[SCHEMA_KEY] = version;
+        }
       }
+
       if (!result[SETTINGS_KEY]) {
         toWrite[SETTINGS_KEY] = { ...DEFAULT_SETTINGS };
       }
@@ -85,6 +112,117 @@ const storageManager = (() => {
     } catch (err) {
       // Migration must never block resume/tracking — continue with defaults.
       console.warn('[YTResume] Migration failed:', err.message);
+    }
+  }
+
+  // YouTube video IDs are always an 11-char [A-Za-z0-9_-] token.
+  const VIDEO_ID_PATTERN = /^[A-Za-z0-9_-]{11}$/;
+  const VIDEO_ID_SUBSTRING_PATTERN = /[A-Za-z0-9_-]{11}/g;
+
+  function isValidVideoId(videoId) {
+    return typeof videoId === 'string' && VIDEO_ID_PATTERN.test(videoId);
+  }
+
+  /**
+   * Resolves a raw youtubeResume key to the canonical video ID it
+   * represents, or null if none can be found. Handles the common case
+   * (key already is the ID) and a defensive fallback (ID embedded in a
+   * malformed key, e.g. stray whitespace or a prefix) without ever
+   * guessing across multiple equally-plausible candidate IDs.
+   */
+  function resolveVideoId(key) {
+    if (typeof key !== 'string') return null;
+    const trimmed = key.trim();
+    if (VIDEO_ID_PATTERN.test(trimmed)) return trimmed;
+    const matches = trimmed.match(VIDEO_ID_SUBSTRING_PATTERN);
+    return matches && matches.length === 1 ? matches[0] : null;
+  }
+
+  /**
+   * Combines two entries known to represent the same video ID: the
+   * furthest playback position wins (paired with its own duration), the
+   * most recently updated entry's title/channel win, falling back to
+   * whichever entry has a value if the more recent one is missing one
+   * (same preserve-if-omitted spirit as D-045).
+   */
+  function nonBlank(value) {
+    return typeof value === 'string' && value.trim() ? value : null;
+  }
+
+  function mergeEntryPair(a, b) {
+    const furthest = (a.time ?? 0) >= (b.time ?? 0) ? a : b;
+    const recent = (a.updated ?? 0) >= (b.updated ?? 0) ? a : b;
+    const other = recent === a ? b : a;
+
+    const merged = {
+      time: furthest.time,
+      duration: furthest.duration,
+      updated: recent.updated,
+    };
+    const title = nonBlank(recent.title) || nonBlank(other.title);
+    const channel = nonBlank(recent.channel) || nonBlank(other.channel);
+    if (title) merged.title = title;
+    if (channel) merged.channel = channel;
+    return merged;
+  }
+
+  /**
+   * Defensive repair pass (Roadmap v3 Phase 2.2). Scans youtubeResume for
+   * keys that don't look like a bare video ID and merges any duplicates
+   * found for the same underlying video ID. Non-destructive: a key whose
+   * video ID can't be resolved is left in place untouched rather than
+   * dropped (2.5 forbids deleting an entry, resolved or not); merging only
+   * ever collapses duplicate rows for the SAME video, never removes a
+   * distinct one. No-op if the store has no malformed/duplicate keys.
+   */
+  function repairStore(store) {
+    const merged = {};
+    let changed = false;
+
+    for (const [key, entry] of Object.entries(store)) {
+      if (!entry || typeof entry !== 'object') continue;
+      const canonicalId = resolveVideoId(key);
+      if (!canonicalId) {
+        merged[key] = entry;
+        continue;
+      }
+      if (canonicalId !== key) changed = true;
+
+      const existing = merged[canonicalId];
+      if (!existing) {
+        merged[canonicalId] = entry;
+      } else {
+        merged[canonicalId] = mergeEntryPair(existing, entry);
+        changed = true;
+      }
+    }
+
+    return { store: merged, changed };
+  }
+
+  /**
+   * Runs repairStore() against the live store and persists the result
+   * only if it actually changed anything. Called once per load, after
+   * migrate() — cheap enough to run unconditionally rather than gate on
+   * Phase 0 having found malformed keys (it found none; this closes the
+   * failure class regardless, per Roadmap v3 2.2).
+   */
+  async function repairDuplicates() {
+    try {
+      assertStorageAvailable();
+      const result = await chrome.storage.local.get(STORAGE_KEY);
+      const store = result[STORAGE_KEY] ?? {};
+      const { store: repaired, changed } = repairStore(store);
+      if (changed) {
+        await chrome.storage.local.set({ [STORAGE_KEY]: repaired });
+        debugLogger.log('repairDuplicates', {
+          beforeCount: Object.keys(store).length,
+          afterCount: Object.keys(repaired).length,
+        });
+      }
+    } catch (err) {
+      // Repair must never block resume/tracking — leave the store as-is.
+      console.warn('[YTResume] Duplicate repair failed:', err.message);
     }
   }
 
@@ -120,9 +258,19 @@ const storageManager = (() => {
    *   preserve-if-omitted behaviour as title, for the same reason
    *   (D-016) — the channel name has no document.title fallback, so a
    *   transient DOM-selector miss is more likely, not less.
+   *
+   * Rejects (Roadmap v3 2.3) if videoId isn't a plausible YouTube video ID
+   * shape — no entry is written. Callers already end this call in
+   * .catch() (progressTracker convention), so this surfaces as a logged,
+   * silently-handled rejection, never an uncaught error.
    */
   async function saveProgress(videoId, time, duration, title, channel) {
     assertStorageAvailable();
+    if (!isValidVideoId(videoId)) {
+      const message = `saveProgress rejected: unresolved videoId (${JSON.stringify(videoId)})`;
+      console.warn('[YTResume]', message);
+      throw new Error(message);
+    }
     const result = await chrome.storage.local.get(STORAGE_KEY);
     const store = result[STORAGE_KEY] ?? {};
     const existing = store[videoId];
@@ -133,12 +281,20 @@ const storageManager = (() => {
       updated: Math.floor(Date.now() / 1000),
     };
 
-    const resolvedTitle = title ? title.slice(0, MAX_TITLE_LENGTH) : existing?.title;
+    // A whitespace-only string is treated the same as omitted (Roadmap v3
+    // 2.4 write-back guard) — a naive truthy check would let it through
+    // and overwrite a real stored title/channel with blank-looking text.
+    // youtubeUtils.getTitle()/getChannelName() never produce one today
+    // (both trim and null out), but the guard must hold regardless of the
+    // caller.
+    const trimmedTitle = typeof title === 'string' ? title.trim() : '';
+    const resolvedTitle = trimmedTitle ? trimmedTitle.slice(0, MAX_TITLE_LENGTH) : existing?.title;
     if (resolvedTitle) {
       entry.title = resolvedTitle;
     }
 
-    const resolvedChannel = channel ? channel.slice(0, MAX_TITLE_LENGTH) : existing?.channel;
+    const trimmedChannel = typeof channel === 'string' ? channel.trim() : '';
+    const resolvedChannel = trimmedChannel ? trimmedChannel.slice(0, MAX_TITLE_LENGTH) : existing?.channel;
     if (resolvedChannel) {
       entry.channel = resolvedChannel;
     }
@@ -236,7 +392,9 @@ const storageManager = (() => {
     return { ...DEFAULT_SETTINGS };
   }
 
-  migrate();
+  // repairDuplicates runs after migrate() resolves, once per load, in
+  // whichever context (content script or popup) loads this module first.
+  migrate().then(repairDuplicates);
 
   return {
     getProgress,

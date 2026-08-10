@@ -680,6 +680,19 @@ Entries without a title display the fallback label in the panel until the user n
 
 **Requirements:** migration is idempotent, never deletes an entry, and never blocks resume if it fails. A migration failure logs a warning and the extension continues with defaults.
 
+**v3.0 (Roadmap Phase 2):** the mechanism above is implemented as a version-aware step chain (one step
+per schema version) instead of a single "write current version" check, so each step's idempotency is
+explicit and independent rather than only true in aggregate — see TDD §4.6. This phase does not itself
+introduce a new schema version. It also adds two non-destructive repair passes, both defensive rather
+than reactive to a confirmed defect (Phase 0 found no evidence of malformed storage keys — see Roadmap
+v3 "Phase 0 Findings"):
+- **Duplicate merge:** any two `youtubeResume` entries found to resolve to the same underlying video ID
+  are merged into one, keeping the furthest playback position and the most recently updated
+  title/channel. Never reduces the count of distinct real videos represented, only duplicate rows for
+  the same one.
+- **Unresolved-ID rejection:** `saveProgress()` refuses (rejects its promise, logged, never thrown
+  uncaught) any write whose `videoId` isn't a plausible YouTube video ID shape. No entry is written.
+
 ---
 
 ## 8. Error Handling & Edge Cases
