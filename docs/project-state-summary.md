@@ -9,10 +9,10 @@
 
 | Phase | Name | Status | Blocked By |
 |---|---|---|---|
-| 0 | Defect Diagnosis & Instrumentation | AWAITING VERIFICATION | — |
+| 0 | Defect Diagnosis & Instrumentation | DONE | — |
 | 1 | Identity Hardening | DONE | — |
-| 2 | Storage Integrity | AWAITING VERIFICATION | — |
-| 3 | Resume Gate & Write Protection | AWAITING VERIFICATION | — |
+| 2 | Storage Integrity | DONE | — |
+| 3 | Resume Gate & Write Protection | DONE | — |
 | 4 | Pinning Data Layer | DONE | — |
 | 5 | Pinning UI | DONE | — |
 | 6 | Doc Reconciliation, Regression & Store Release | DONE | — |
@@ -55,10 +55,9 @@ in-player UI (Phase 5), single-`setInterval` fix (D-059). Full history in `docs/
 
 ## Next action
 
-All seven v3.0.0 phases (0–6) are built and self-verified; Phases 1, 4, 5, and 6 are owner-confirmed
-`DONE`. Phases 0, 2, and 3 remain `AWAITING VERIFICATION` — owner review still needed for Phase 0's
-visual-facing implications. Nothing is blocking — see `docs/DECISIONS.md` "Currently blocking" for the
-one open, non-blocking item (D-034).
+All seven v3.0.0 phases (0–6) are built, self-verified, and owner-confirmed `DONE`. v3.0.0 is
+release-ready. Nothing is blocking — see `docs/DECISIONS.md` "Currently blocking" for the one open,
+non-blocking item (D-034).
 
 ## Doc versions
 
