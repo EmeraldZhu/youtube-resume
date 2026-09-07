@@ -25,10 +25,11 @@ below are planning only — no code written yet.
 
 Ship gates: A after Phase 3 (storage correctness), B after Phase 6 (resume reliability), C after
 Phase 8 (product completeness). Phases 0–3 are independently releasable (Roadmap v4 §3). Key
-decisions logged D-100–D-112: background service worker as sole storage writer (D-102), per-video
+decisions logged D-100–D-116: background service worker as sole storage writer (D-102), per-video
 keys rejected (D-103), additive `ended` completion field + legacy inference rule (D-104), "Remove
 completed" behavior (D-105), fourth completion-threshold option (D-106), `t=` timestamp precedence
-(D-107), committed `tests/` regression harness (D-108). New copy starts at CP-68 (D-110).
+(D-107), committed `tests/` regression harness (D-108). UX Spec 4.0.0 copy IDs CP-68–CP-79 now
+assigned (D-110); CP-80 is the next free ID.
 
 ## Prior releases (shipped, owner-confirmed DONE)
 
@@ -49,5 +50,5 @@ blocking — see `docs/DECISIONS.md` "Currently blocking" for the one open, non-
 
 ## Doc versions
 
-PRD **4.0.0** · UX Spec **3.0.0** · TDD **3.0.0** (both pending update in later v4 prompts) ·
+PRD **4.0.0** · UX Spec **4.0.0** · TDD **3.0.0** (pending update in a later v4 prompt) ·
 Roadmap v2 2.0.0 · Roadmap v3 3.0.0 (shipped) · Roadmap v4 (draft).

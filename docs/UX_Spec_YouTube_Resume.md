@@ -7,11 +7,11 @@
 |---|---|
 | **Product** | YouTube Resume |
 | **Document Type** | UI/UX Specification |
-| **Version** | 3.0.0 |
-| **Previous Version** | 2.0.0 |
+| **Version** | 4.0.0 |
+| **Previous Version** | 3.0.0 |
 | **Status** | Approved — Ready for Implementation |
-| **Last Updated** | 2026-08-10 |
-| **Companion Documents** | PRD_YouTube_Resume.md v3.0.0, ROADMAP_v3.md, TDD_YouTube_Resume.md |
+| **Last Updated** | 2026-09-08 |
+| **Companion Documents** | PRD_YouTube_Resume.md v4.0.0, ROADMAP_v4.md, TDD_YouTube_Resume.md (still v3.0.0 — stale, see CLAUDE.md doc-routing table) |
 
 ---
 
@@ -36,6 +36,20 @@
 | C10 | Lazy title backfill documented for the saved videos view (reuses existing CP-37 fallback, no new copy) | §6.3 |
 | C11 | "Clear saved progress" confirmation specified to disclose that pinned videos are deleted too | §6.4 |
 | C12 | Copy IDs CP-62 through CP-67 added for pinning | §7.3 |
+
+## Changelog — v3.0.0 → v4.0.0
+
+| # | Change | Section |
+|---|---|---|
+| C13 | Resume toast honesty: toast fires only after a **verified** resume; pending/deferred/failed outcomes are explicitly specified as silent, not an error state | §5.3, §5.6 |
+| C14 | "Remove completed" action added to the saved videos view: discoverable placement, live matching count, preview-before-confirm, pinned-entries-preserved-by-default with an include-pinned opt-in, existing inline confirmation pattern | §6.3 |
+| C15 | Zero-match state for "Remove completed" and a distinct load-failure state for the saved videos list (no longer conflated with "No saved videos yet") specified | §6.3 |
+| C16 | Displayed percentage capped below 100% unless the completion marker is present; distinct completed-row label specified | §6.3 |
+| C17 | Popup rows specified to reconcile against storage changes while open, without losing keyboard focus; per-row actions disable while a mutation is pending; counts derive from acknowledged state only | §6.3 |
+| C18 | "Treat as finished at" gains a fourth segment, "Only at the end"; CP-43h helper copy updated for accuracy | §6.4 |
+| C19 | Turning thumbnails off specified to apply immediately to already-rendered rows within the same popup session, with an explicit boundary for requests already in flight | §6.4 |
+| C20 | Accessibility: focus handoff on row removal/pin re-sort/confirmation open-cancel, programmatic setting-group-label association, list-count-change announcement, `prefers-reduced-motion` support | §8 |
+| C21 | Copy IDs CP-68 through CP-79 added | §7.3, §7.4 |
 
 ---
 
@@ -237,6 +251,8 @@ Momentary confirmation that the extension acted. Users who miss the Restart butt
 
 Displayed **only** when a resume seek is applied and verified and a valid `resumeTime` is known, and only when `showToast` is on.
 
+"Verified" is the whole trigger — not "attempted," not "the seek call returned without throwing." A seek that lands off-target, is later overridden by YouTube's own native restore, or never settles is **not** a resume the toast reports on. See §5.6.
+
 ### 5.4 Visual Specification
 
 #### Copy
@@ -317,6 +333,27 @@ Lower-left of the video frame, **fully clear of the progress bar**.
 - Must not interfere with YouTube's own overlay messages
 - Must not overlap the Restart button or the time display in any player mode
 - When `showToast` is off, do not create the element at all
+- **Reduced motion** *(v4.0, F18)*: when `prefers-reduced-motion: reduce` is set, skip the fade transitions and show/remove the toast at full opacity for the same ~2200ms total window — the timing budget doesn't change, only the animated opacity ramp
+
+### 5.6 Non-Success States *(new in v4.0)*
+
+The toast has exactly one visible state: a verified resume happened. Every other outcome is silent
+on this surface, matching the standing principle "failures are silent to the user, logged to console"
+(CLAUDE.md) and the audit's own instruction not to invent an intrusive failure state (F01/F05).
+
+| Outcome | What the user sees | What happens instead |
+|---|---|---|
+| **Pending** — a resume attempt is still in progress (waiting on ad clearance, player/metadata readiness, or seek-verification retry) | Nothing. No toast, no placeholder, no spinner | The attempt continues in the background up to its bounded deadline; console-only diagnostics if `DEBUG` is enabled locally |
+| **Deferred** — the attempt can't proceed yet but isn't abandoned (tab restored inactive, page frozen/discarded, ads still clearing) | Nothing, for as long as the deferral lasts | If the deferred attempt later succeeds and is verified, the toast (and Restart button) appear **at that later time** — a delayed success is still a success, shown once, not retroactively for the missed window |
+| **Failed** — verification never confirms a landed, stable position within the attempt's bounded window, or the attempt is abandoned (ceiling reached, cancelled by newer navigation, native override wins) | Nothing. No toast, no in-player banner, no icon change | Playback continues untouched from wherever it naturally is; the failure is logged to console only, never surfaced as UI |
+
+**Do not build:** an error toast, a "couldn't resume" message, a retry prompt, or any in-player
+indicator that a resume was attempted and didn't work. §1.1's "no UI during normal, uninterrupted
+playback" principle extends here — a user who never notices a failed resume is not owed a UI element
+explaining that nothing happened. The saved checkpoint itself is preserved on failure (not overwritten
+by the pre-resume startup position) so the next attempt — a later readiness event, or the user simply
+reopening the video — has an accurate position to try again; that preservation, not a UI signal, is
+the product's actual answer to "the resume failed."
 
 ---
 
@@ -387,7 +424,7 @@ Lower-left of the video frame, **fully clear of the progress bar**.
 | **Pinned badge** *(v3.0)* | Top-left corner of the thumbnail, small filled pin glyph (inline SVG, not emoji) — rendered **only** when the entry is pinned. Passive indicator, not interactive; `aria-hidden="true"` on the glyph itself since the row's pin control (below) already carries an accessible name for the state |
 | Title | Two lines maximum, ellipsis overflow. Falls back to CP-37 |
 | Channel name | One line, ellipsis overflow, muted. Omitted entirely (no placeholder) when not yet captured |
-| Meta line | CP-34 and CP-35 — `{position} / {duration} · {percent}% watched` |
+| Meta line | CP-34 and CP-35 — `{position} / {duration} · {percent}% watched`. **Percentage is capped at 99%** unless the completion marker is present (see "Completion Display" below) — a row never reads "100% watched" from playhead position alone |
 | **Pin control** *(v3.0)* | Inline SVG icon button, positioned in the row's action area immediately to the left of the remove control (`📌 ✕` reading order). Revealed on row hover, like the remove control — but see the note below on the persistent pinned badge, which is what signals pinned state without hovering. Always keyboard-focusable. Outline glyph when unpinned; filled glyph when pinned. `aria-pressed="true"`/`"false"` reflects state; `aria-label` switches between CP-62 (unpinned → "Pin this video") and CP-63 (pinned → "Unpin this video") |
 | Remove control | `✕`, revealed on row hover, always keyboard-focusable |
 | Whole-row target | `<a href="https://www.youtube.com/watch?v={id}" target="_blank" rel="noopener noreferrer">` |
@@ -425,6 +462,110 @@ Attempting to pin a 21st video is a **refusal, not a silent no-op, and never an 
 
 **Thumbnails disabled:** render the placeholder and issue **no** network request. `loading="lazy"` is not sufficient — the `src` must not be set at all. The duration badge and progress line still render — they're text/CSS, not a request, so D-005's zero-network guarantee is unaffected.
 
+**Thumbnails re-enabled or disabled mid-session** *(v4.0, F17)*: applying `loadThumbnails` is not
+deferred to the next popup open. The instant the toggle changes in Settings, every already-rendered
+row in the (still-in-memory) saved videos list is updated to match: turning thumbnails off clears
+every rendered `<img>`'s `src` immediately (rows not yet scrolled into view never get one queued in
+the first place); turning them on sets `src` on every row currently showing the placeholder. The
+honest boundary, stated plainly rather than implied: **a request already sent before the toggle
+changed cannot be recalled** — an image mid-flight when the user switches thumbnails off may still
+finish loading and paint once. This is a network timing fact, not a bug, and nothing in the popup
+should claim otherwise (CP-47h is unchanged; it already only promises the *off* state stops new
+requests, not that in-flight ones vanish).
+
+#### Completion Display *(new in v4.0)*
+
+A row shows the completed-row label (CP-77) in place of the percentage — replacing the entire meta
+line, not just the percent segment — whenever the completion marker is present: a genuine `ended`
+event was recorded, or, for a legacy entry saved before that marker existed, the conservative
+inference rule holds (position is within the smallest unit the stored integer-second data can
+represent of the duration). Every other row shows the existing `{position} / {duration} · {percent}%
+watched` meta line with percent capped at 99, per the Row Specification table above. Reaching 99% by
+playhead position alone — including a seek to the very end — is still just 99% watched here; only the
+completion marker earns the completed label. This is a display rule only: it does not change resume
+eligibility, which is governed entirely by the `completionThreshold` setting (§6.4).
+
+#### Remove Completed *(new in v4.0)*
+
+**Placement:** a text button in the list header, next to the count (`{n} saved videos` area),
+discoverable without opening Settings — this is a saved-videos-view action, not a settings action,
+since it operates on what's currently listed. Disabled (not hidden) when the live matching count is
+zero, so the control's existence is always discoverable even in a library with nothing to remove.
+
+```
+┌──────────────────────────────────────────────────┐
+│  YouTube Resume    ☕   34 saved videos ⚙        │
+│  [ Remove completed (6) ]  [ ] Include pinned     │ ← new row, header area
+├──────────────────────────────────────────────────┤
+```
+
+**Label and live count:** the button reads CP-68 (`Remove completed`) with the current matching count
+shown alongside it, using the plural/singular pair CP-69/CP-70 exactly like the header's own
+CP-38/CP-39 convention. The count is **live** — it re-derives from the same completion predicate used
+for the completed-row label above, recomputed whenever the underlying list changes (a new save
+completes a video, a row is removed, a pin toggles the include-pinned scope), never a stale snapshot
+taken when the popup opened.
+
+**Pinned scope:** pinned entries are **excluded by default** from both the count and the removal,
+regardless of completion state — pinning already means "keep this," and a user who pinned a finished
+video most likely wants it kept as a reference, not swept up because it also happens to be complete.
+An **include-pinned** checkbox/toggle sits beside the button (CP-73, `Include pinned videos`) — when
+checked, completed pinned entries join the count and the removal set for that one action only; the
+checkbox itself does not persist as a setting and resets to unchecked the next time the popup opens.
+
+**Preview before confirm:** the count the user sees on the button *is* the preview — there is no
+separate "are you sure, N will be removed" step distinct from what's already visible before the click.
+Clicking the button (only enabled when the count is ≥1) goes straight to the existing inline
+confirmation pattern (the CP-48/49 pattern, §6.4): the button and checkbox are replaced in place by
+confirmation copy naming the same count, then the user commits or cancels.
+
+```
+Before:    [ Remove completed (6) ]  [ ] Include pinned
+After:     Remove completed videos?
+           This will permanently remove 6 completed videos. This cannot be undone.  [ Remove ] [ Cancel ]
+Confirmed: header row restored, count re-derives, list reflects the removal
+```
+
+- CP-71 (prompt) — `Remove completed videos?`
+- CP-72 (body) — `This will permanently remove {countLabel}. This cannot be undone.` where
+  `{countLabel}` is CP-69 or CP-70 verbatim (`6 completed videos` / `1 completed video`) — reusing the
+  same count strings the button already showed, so the number in the confirmation always matches what
+  the user just previewed
+- CP-79 (confirm button) — `Remove` — distinct from CP-51 (`Clear`), since this action removes a
+  filtered subset, not everything
+- Cancel button reuses the existing generic CP-52 (`Cancel`) — same button, same behavior, no new copy
+
+**No modal, no `window.confirm()`, no undo window** — consistent with every other destructive action
+in this popup (§6.4). One coordinated batch mutation; unrelated entries, settings, and schema are
+untouched.
+
+**Zero-match state:** when the live count is 0 — nothing matches the completion predicate in the
+current pinned scope — the button is disabled (not removed) and CP-74 (`No completed videos to
+remove`) appears in its place inline, so the reason for the disabled state is stated, not left to
+guesswork. Checking "Include pinned" while at zero re-evaluates immediately; if that makes the count
+≥1, the button re-enables and CP-74 is replaced by the live count.
+
+#### List Reconciliation *(new in v4.0, F16)*
+
+The list is not a one-time snapshot for the life of the popup. While the popup stays open:
+
+- Rows reconcile against storage changes as they happen (playback elsewhere updating progress, an
+  eviction, another tab pinning/removing the same entry) — the visible list, header count, and
+  Remove-completed count all stay accurate to current storage, not to what was true when the popup
+  opened.
+- Reconciling **never steals keyboard focus.** If the user is mid-interaction with a row (focused on
+  its pin/remove control, or inside an open inline confirmation), a storage-driven update to a
+  *different* row must not move focus. An update to the *focused* row's own data (e.g. its progress
+  ticking up) updates the row in place without disturbing which element has focus.
+- **Per-row actions disable while their own mutation is pending** — a pin/unpin or remove click
+  disables that row's controls immediately until the storage write is acknowledged, preventing a
+  second queued click on the same row from double-counting. This does not block interaction with
+  *other* rows.
+- **Counts derive from acknowledged state only**, never an optimistic increment/decrement made before
+  the storage write resolves. The header count, the Remove-completed count, and the pinned count all
+  update only once storage confirms the change — a rapid double-click produces one state change, not
+  two miscounted ones.
+
 #### Empty State
 
 ```
@@ -442,6 +583,36 @@ Attempting to pin a 21st video is a **refusal, not a silent no-op, and never an 
 
 The empty state doubles as the confirmation that the extension is installed and working. This is why the v1.0 status row could be removed.
 
+#### Load-Failure State *(new in v4.0, F12)*
+
+CP-32 (`No saved videos yet`) must **never** be shown when reading storage failed — it asserts "your
+library is empty," which is a specific, false claim to make when the truth is "the popup couldn't
+read your library." This state renders in the same layout position as the empty state but with
+distinct copy, so the two are never visually or semantically interchangeable:
+
+```
+┌────────────────────────────────────────────────┐
+│  YouTube Resume                             ⚙ │
+├────────────────────────────────────────────────┤
+│                                                │
+│         Couldn't load saved videos             │
+│                                                │
+│    Something went wrong reading your saved     │
+│    videos. Try reopening the popup.            │
+│                                                │
+└────────────────────────────────────────────────┘
+```
+
+- CP-75 (title) — `Couldn't load saved videos`
+- CP-76 (body) — `Something went wrong reading your saved videos. Try reopening the popup.`
+
+Triggered when the progress read itself fails or returns malformed data the popup cannot safely
+render — not when settings alone fail to load. A settings-read failure must not hide valid saved-video
+data: the list renders normally against safe setting defaults, per the existing graceful-degradation
+principle (CLAUDE.md), and only the progress read failing produces this state. No retry button and no
+auto-retry loop — "reopening the popup" is the existing, sufficient recovery path, consistent with
+this popup's no-loading-states, no-spinner constraint (§6.2).
+
 ### 6.4 View 2 — Settings
 
 #### Layout
@@ -456,8 +627,10 @@ The empty state doubles as the confirmation that the extension is installed and 
 │  less than this.                               │
 ├────────────────────────────────────────────────┤
 │  Treat as finished at                          │
-│  [ 90% ][ 95% ][ 98% ]                         │
+│  [ 90% ][ 95% ][ 98% ][ Only at the end ]      │
 │  Videos watched past this point won't resume.  │
+│  "Only at the end" waits until the video       │
+│  actually finishes.                            │
 ├────────────────────────────────────────────────┤
 │  Rewind on resume                              │
 │  [ Off ][ 2s ][ 5s ][ 10s ]                    │
@@ -486,17 +659,28 @@ The empty state doubles as the confirmation that the extension is installed and 
 | Setting | Control | Options | Default | Copy ID |
 |---|---|---|---|---|
 | `minWatchSeconds` | Segmented | 10s / 30s / 1m / 2m | 30s | CP-42 |
-| `completionThreshold` | Segmented | 90% / 95% / 98% | 95% | CP-43 |
+| `completionThreshold` | Segmented | 90% / 95% / 98% / Only at the end *(v4.0)* | 95% | CP-43, CP-78 |
 | `rewindSeconds` | Segmented | Off / 2s / 5s / 10s | 2s | CP-44 |
 | `showToast` | Toggle | On / Off | On | CP-45 |
 | `showRestartButton` | Toggle | On / Off | On | CP-46 |
 | `loadThumbnails` | Toggle | On / Off | On | CP-47 |
+
+**"Only at the end"** *(new in v4.0)* is a fourth point on the same segmented control, not a separate
+setting — selecting it means the video must actually finish (the completion marker from §6.3's
+"Completion Display") before resume/near-completion suppression applies, rather than crossing any
+percentage-of-duration line. A user who stops at 99% of a long video and never finishes it will still
+resume normally under this option, unlike 90/95/98%.
 
 **No free numeric input.** Preset choices only — this eliminates validation, invalid states, and keyboard entry on a narrow surface.
 
 **No Save button.** Changes persist on interaction.
 
 **Helper text** sits below its control in muted 12px. Toggles share one helper only where needed (thumbnails); the two UI toggles are self-explanatory.
+
+**`loadThumbnails` takes effect immediately, not on next popup open** *(v4.0, F17)* — see §6.3's
+"Thumbnails re-enabled or disabled mid-session" for the exact behavior and its stated boundary
+(requests already sent cannot be recalled). CP-47h's wording is unaffected by this — it already
+describes the setting's purpose, not its propagation timing.
 
 #### Destructive Actions
 
@@ -626,6 +810,22 @@ The single source of truth for all user-facing text.
 > `aria-pressed`/`aria-label` (CP-62/CP-63), so a second announcement on the badge would be
 > redundant. Not retired (§7.5) since it was never assigned copy; do not reuse.
 
+**Remove completed and related states, added in v4.0:**
+
+| ID | Element | Copy |
+|---|---|---|
+| CP-68 | Remove-completed button label | `Remove completed` |
+| CP-69 | Remove-completed live count, plural | `{n} completed videos` |
+| CP-70 | Remove-completed live count, singular | `1 completed video` |
+| CP-71 | Remove-completed confirmation prompt | `Remove completed videos?` |
+| CP-72 | Remove-completed confirmation body | `This will permanently remove {countLabel}. This cannot be undone.` (`{countLabel}` is CP-69 or CP-70 verbatim) |
+| CP-73 | Remove-completed — include-pinned option label | `Include pinned videos` |
+| CP-74 | Remove-completed — zero-match message | `No completed videos to remove` |
+| CP-75 | Load-failure state title | `Couldn't load saved videos` |
+| CP-76 | Load-failure state body | `Something went wrong reading your saved videos. Try reopening the popup.` |
+| CP-77 | Row — completed-row label, replaces the percentage meta line | `Completed` |
+| CP-79 | Remove-completed confirm button | `Remove` |
+
 ### 7.4 Popup — Settings View *(new in v2.0)*
 
 | ID | Element | Copy |
@@ -635,7 +835,7 @@ The single source of truth for all user-facing text.
 | CP-42 | Setting label | `Minimum watch time` |
 | CP-42h | Setting helper | `Don't save or resume videos watched for less than this.` |
 | CP-43 | Setting label | `Treat as finished at` |
-| CP-43h | Setting helper | `Videos watched past this point won't resume.` |
+| CP-43h | Setting helper *(updated in v4.0 — see below)* | `Videos watched past this point won't resume. "Only at the end" waits until the video actually finishes.` |
 | CP-44 | Setting label | `Rewind on resume` |
 | CP-44h | Setting helper | `Start slightly before where you left off.` |
 | CP-45 | Setting label | `Show "Resumed from" message` |
@@ -663,6 +863,16 @@ The single source of truth for all user-facing text.
 |---|---|---|
 | CP-66 | Confirmation body — pinned note, plural, appended after CP-50 when applicable | `This includes {p} pinned videos.` |
 | CP-67 | Confirmation body — pinned note, singular, appended after CP-50 when applicable | `This includes 1 pinned video.` |
+
+**Completion policy, added in v4.0:**
+
+| ID | Element | Copy |
+|---|---|---|
+| CP-78 | `completionThreshold` segment label, fourth option | `Only at the end` |
+
+> **CP-43h note:** the existing helper (§7.4 above) is updated in place, per this update's explicit
+> instruction, to stay accurate now that the setting has a fourth, non-percentage option. Its ID is
+> unchanged and every other existing CP ID in this document is untouched.
 
 ### 7.5 Retired Copy IDs
 
@@ -713,6 +923,12 @@ The single source of truth for all user-facing text.
 | Confirmation copy | Inline pattern, announced via `aria-live="polite"` |
 | Colour not sole signal | Progress conveyed by both bar and text percentage |
 | Focus visible | Never suppressed anywhere in the popup |
+| Focus on row removal *(v4.0, F18)* | Moves to the next row's equivalent control (or, if the removed row was last, the previous row's); if the list becomes empty, focus moves to the header's Remove-completed button or, failing that, the settings gear |
+| Focus during pin re-sort *(v4.0, F18)* | The pin control retains focus across its DOM move when the row re-sorts to the pinned/unpinned boundary — detach-and-reinsert must not drop focus to `<body>` |
+| Focus on confirmation open/cancel *(v4.0, F18)* | Opening any inline confirmation (Remove completed, Clear saved progress, Reset to defaults) moves focus to its Cancel control; cancelling restores focus to the control that opened it (the button now back in its normal state) |
+| Setting-group label association *(v4.0, F18)* | Each segmented control's visible label is programmatically associated via `aria-labelledby` on the `role="radiogroup"` container — not a visual-only span |
+| List count changes *(v4.0, F18)* | The header count (CP-38/CP-39) and the Remove-completed live count (CP-69/CP-70) live inside a `role="status"`/`aria-live="polite"` region so a count change is announced without moving focus |
+| Reduced motion *(v4.0, F18)* | Every decorative transition in the popup (inline-confirmation swap, pin-limit-message auto-dismiss fade) respects `prefers-reduced-motion: reduce` by showing/hiding instantly instead of animating. The in-player toast's own fade is covered separately in §5.5 |
 
 ---
 
