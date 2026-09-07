@@ -12,7 +12,7 @@ below are planning only — no code written yet.
 
 | Phase | Name | Status | Blocked By |
 |---|---|---|---|
-| 0 | Reproduction & Harness Foundation | AWAITING VERIFICATION | — |
+| 0 | Reproduction & Harness Foundation | DONE | — |
 | 1 | Boundary Validation & Safe Repair | NOT STARTED | — |
 | 2 | Serialized Storage Writer | NOT STARTED | — |
 | 3 | Write Ownership, Freshness & Durable Saves | NOT STARTED | — |
@@ -46,12 +46,13 @@ A phase is `DONE` only when the owner confirms it. Claude Code never writes `DON
 
 ## Next action
 
-Phase 0 done this session: `tests/` harness committed (`node tests/run.js`, zero dependencies), all
-24 R1–R24 cases reproduce against current HEAD (`docs/PHASE0_FINDINGS_v4.md`,
-`docs/ROADMAP_v4.md` Phase 0 Findings), phase prompt set saved (`docs/PHASE_PROMPTS_v4.md`). No
-production file changed. Begin Phase 1 (Boundary Validation & Safe Repair) next, using
-`docs/PHASE_PROMPTS_v4.md`'s Phase 1 prompt after `/clear`. Nothing is blocking — see
-`docs/DECISIONS.md` "Currently blocking" for the one open, non-blocking item (D-034).
+Phase 0 DONE (owner-confirmed — no owner-facing visual check existed for this phase; harness/backend
+work only, self-verified via `node tests/run.js`). `tests/` harness committed, all 24 R1–R24 cases
+reproduce against current HEAD (`docs/PHASE0_FINDINGS_v4.md`, `docs/ROADMAP_v4.md` Phase 0 Findings),
+phase prompt set saved (`docs/PHASE_PROMPTS_v4.md`). No production file changed. Begin Phase 1
+(Boundary Validation & Safe Repair) next, using `docs/PHASE_PROMPTS_v4.md`'s Phase 1 prompt after
+`/clear`. Nothing is blocking — see `docs/DECISIONS.md` "Currently blocking" for the one open,
+non-blocking item (D-034).
 
 ## Doc versions
 
