@@ -1,7 +1,8 @@
 # YouTube Resume — Chrome Extension (MV3)
 
-Target: **v2.0.0**. v1.0.0 is live on the Chrome Web Store with real users.
-Build plan: `docs/ROADMAP_v2.md`, 9 sequential phases.
+Target: **v4.0.0**, in progress. v3.0.0 is the shipped baseline, live on the Chrome Web Store with
+real users and real saved data.
+Build plan: `docs/ROADMAP_v4.md`, 10 sequential phases (authoritative for current work).
 
 <!-- Maintainer note: HTML comments are stripped before injection and cost no tokens.
      Keep this file under 200 lines. Run /doctor occasionally to check for trimmable content. -->
@@ -95,11 +96,14 @@ decision. It is the one place slowing down is correct — and only for the check
   image GET to `i.ytimg.com` from the popup, and only when `loadThumbnails` is on.
 - No `innerHTML`, no `eval`, no inline `<script>`, no external scripts, no analytics, no dependencies.
   DOM via `document.createElement` only.
-- Only `storage/storageManager.js` touches `chrome.storage.local`.
+- Only `storage/storageManager.js` and `background/storageWriter.js` may touch `chrome.storage.local`.
+  `storageManager` is the sole read path; `storageWriter` is the sole write path. Every other module
+  goes through `storageManager`'s public API.
 - Exactly one `setInterval` and one `MutationObserver` alive at any time. Re-target, never duplicate.
-- Storage root keys: `youtubeResume` (200-entry cap, oldest-first eviction by `updated`),
-  `youtubeResumeSettings`, `youtubeResumeSchema`. Settings and schema version must **never** nest
-  inside `youtubeResume` — its keys are counted for eviction.
+- Storage root keys: `youtubeResume` (200-entry cap on unpinned entries, oldest-first eviction by
+  `updated`, plus up to 20 pinned entries exempt from that cap), `youtubeResumeSettings`,
+  `youtubeResumeSchema`. Settings and schema version must **never** nest inside `youtubeResume` —
+  its keys are counted for eviction.
 - The 400ms resume delay is fixed and never user-configurable.
 - Every promise chain ends in `.catch()`. The extension must never break YouTube.
 - No UI during normal, uninterrupted playback.
@@ -112,7 +116,7 @@ Docs total ~30k tokens. Reading them all costs more than most tasks. Grep, then 
 | Need | Read |
 |---|---|
 | Where the build stands | `docs/project-state-summary.md` + `docs/DECISIONS.md` — always first |
-| What to build now | `docs/ROADMAP_v2.md` — current phase only |
+| What to build now | `docs/ROADMAP_v4.md` — current phase only |
 | Product intent, scope, non-goals | `docs/PRD_YouTube_Resume.md` §3 |
 | Storage schema, migration, eviction | PRD §7 |
 | Resume logic, ad gating, tracking triggers | PRD §5.4, §5.5, §5.7 |
@@ -125,8 +129,13 @@ Docs total ~30k tokens. Reading them all costs more than most tasks. Grep, then 
 **Precedence:** TDD > UX Spec > Roadmap > PRD for implementation detail; PRD wins on intent and scope.
 **Shipped code beats every doc.** Follow the code, fix the doc, log Tier 2.
 
-**Known drifts — don't rediscover:** TDD is still v1.0.0 and describes pre-v2 behaviour; treat it as
-stale for anything Phase 2+ changed. Icons are `icon-16.png`, hyphenated.
+**Doc versions:** PRD 4.0.0 · UX Spec 4.0.0 · TDD 3.0.0, pending per-phase updates to 4.0.0-draft as
+v4 phases land · Roadmap v4 is authoritative for current work (ROADMAP_v2.md/ROADMAP_v3.md are
+historical).
+
+**Known drifts — don't rediscover:** TDD is still v3.0.0 and describes pre-v4 behaviour; treat it as
+stale for anything Phase 2+ (v4) changes until its per-phase update lands. Icons are `icon-16.png`,
+hyphenated.
 
 ## Token discipline
 

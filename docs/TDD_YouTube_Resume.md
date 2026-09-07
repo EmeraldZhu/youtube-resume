@@ -7,11 +7,11 @@
 |---|---|
 | **Product** | YouTube Resume |
 | **Document Type** | Technical Design Document (TDD) |
-| **Version** | 3.0.0 |
-| **Previous Version** | 2.0.0 |
-| **Status** | Reconciled against shipped v3.0.0 code (Phase 6, Roadmap v3 6.6) |
-| **Last Updated** | 2026-08-10 |
-| **Companion Document** | PRD_YouTube_Resume.md v3.0.0 |
+| **Version** | 4.0.0-draft |
+| **Previous Version** | 3.0.0 |
+| **Status** | Reconciled against shipped v3.0.0 code (Phase 6, Roadmap v3 6.6); §1/§1.2/§2 updated for the approved v4 architecture (D-102), remaining sections pending per-phase updates as Roadmap v4 lands |
+| **Last Updated** | 2026-09-08 |
+| **Companion Document** | PRD_YouTube_Resume.md v4.0.0 |
 
 ---
 
@@ -46,9 +46,16 @@
 
 ## 1. System Overview
 
-YouTube Resume is implemented as a **Manifest V3 Chrome content script plus a popup**. There is no
-background service worker and no options page. Resume/tracking logic runs entirely within the
-YouTube page context, isolated by Chrome's default content script sandbox; the popup (Phases 6–8)
+YouTube Resume is implemented as a **Manifest V3 Chrome content script plus a popup**, plus, as of
+v4.0.0 (Roadmap v4 Phase 2/3, D-102), a minimal background service worker. There is no options page.
+Resume/tracking logic runs entirely within the YouTube page context, isolated by Chrome's default
+content script sandbox; the service worker holds no resume or tracking logic of its own — it exists
+solely as `background/storageWriter.js`, the serialized writer for every `chrome.storage.local`
+mutation (see §1.2, §2, §4.6). It makes no network request and is restart-safe: MV3 can terminate an
+idle service worker at any time, so every command it applies must be safely re-appliable from
+`chrome.storage.local` state alone, with no state held only in worker memory. It adds no permission —
+`manifest.json` gains only a `background.service_worker` entry; `permissions`/`host_permissions` are
+unchanged. The popup (Phases 6–8)
 is a separate document (`popup/popup.html`, opened via `action.default_popup`) that never runs in
 page context and talks to storage only through `storage/storageManager.js` (D-044) — it holds two
 views, the saved-videos list (default) and settings, never a background page or a new tab (D-008).
@@ -75,7 +82,7 @@ bootstrap.js
 | Execution context | Content script (isolated world) |
 | Host page | `https://www.youtube.com/*` |
 | `run_at` | `document_idle` |
-| Background script | None required |
+| Background script | `background/storageWriter.js` — serialized storage writer only (v4, D-102); no resume/tracking logic, no network request, restart-safe |
 | Popup | `popup/popup.html` — saved-videos list + settings, two views in one popup document (v2, Phases 6/8) |
 | Options page | None — settings live inside the popup, not a `chrome://extensions` options page (D-008) |
 
@@ -103,6 +110,10 @@ youtube-resume/
 │   ├── progressTracker.js      # Interval + event-based progress saving
 │   └── uiInjector.js           # Restart button DOM injection + lifecycle
 │
+├── background/
+│   └── storageWriter.js        # v4 (Phase 2/3, D-102) — sole chrome.storage.local write path;
+│                                 # serialized, restart-safe MV3 service worker; no other logic
+│
 ├── storage/
 │   └── storageManager.js       # chrome.storage.local abstraction
 │
@@ -127,7 +138,10 @@ youtube-resume/
 - `content/` contains all runtime logic that executes in-page
 - `storage/` is isolated to make it independently testable and swappable — as of Phase 4 it is also
   loaded by `popup/popup.js`, making it the sole owner of `chrome.storage.local` across both
-  contexts (D-044), not just the content script
+  contexts (D-044), not just the content script. As of v4.0.0 (Phase 2/3, D-102), read access stays
+  here; `background/` becomes the sole write path (see §4.6)
+- `background/` is new in v4.0.0 (D-102) — a single-purpose serialized writer, not a home for
+  resume/tracking/business logic, which stays in `content/`
 - `utils/` contains only pure functions — no side effects, no DOM access, no storage calls
 
 ---
@@ -818,6 +832,14 @@ function stop() {
 **Purpose:** Typed abstraction over `chrome.storage.local`. Owns all storage read/write/eviction/migration
 logic — the ONLY module that may touch `chrome.storage.local` (enforced for both the content script and
 the popup, which loads this module too as of Phase 4).
+
+**v4.0.0 forward reference (Phase 2/3, D-102):** `storageManager`'s write path becomes a client of
+the new `background/storageWriter.js` service worker — every mutation this module currently applies
+directly to `chrome.storage.local` will instead be sent as a command to the worker, which is the
+sole write path from that phase on. Reads are unaffected and stay direct. This module's public API
+(below) is unchanged by that move. The mechanism itself is out of scope here and lands in this
+section per-phase as Roadmap v4 Phase 2/3 is implemented, per the standing v3 convention of updating
+the TDD after a phase lands rather than ahead of it (D-030).
 
 #### Public API
 

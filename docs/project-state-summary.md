@@ -50,5 +50,10 @@ blocking — see `docs/DECISIONS.md` "Currently blocking" for the one open, non-
 
 ## Doc versions
 
-PRD **4.0.0** · UX Spec **4.0.0** · TDD **3.0.0** (pending update in a later v4 prompt) ·
+PRD **4.0.0** · UX Spec **4.0.0** · TDD **4.0.0-draft** (§1/§1.2/§2/§4.6 updated for the v4
+service-worker architecture; remaining sections pending per-phase updates) ·
 Roadmap v2 2.0.0 · Roadmap v3 3.0.0 (shipped) · Roadmap v4 (draft).
+
+**Constraint amendment (D-125):** CLAUDE.md's storage-access rule now permits two modules to touch
+`chrome.storage.local` — `storageManager.js` (sole read path) and `background/storageWriter.js`
+(sole write path, D-102). Not a violation to rediscover.
