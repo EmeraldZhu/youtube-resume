@@ -49,5 +49,5 @@ blocking — see `docs/DECISIONS.md` "Currently blocking" for the one open, non-
 
 ## Doc versions
 
-PRD **3.0.0** · UX Spec **3.0.0** · TDD **3.0.0** (all pending update in later v4 prompts) ·
+PRD **4.0.0** · UX Spec **3.0.0** · TDD **3.0.0** (both pending update in later v4 prompts) ·
 Roadmap v2 2.0.0 · Roadmap v3 3.0.0 (shipped) · Roadmap v4 (draft).

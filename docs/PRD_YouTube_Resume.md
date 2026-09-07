@@ -7,12 +7,12 @@
 |---|---|
 | **Product Name** | YouTube Resume |
 | **Product Type** | Chrome Extension (Manifest V3) |
-| **Version** | 3.0.0 |
-| **Previous Version** | 2.0.0 (live on Chrome Web Store) |
+| **Version** | 4.0.0 |
+| **Previous Version** | 3.0.0 (live on Chrome Web Store) |
 | **Status** | Approved — Ready for Engineering |
-| **Last Updated** | 2026-08-10 |
+| **Last Updated** | 2026-09-08 |
 | **Owner** | Product |
-| **Companion Documents** | ROADMAP_v3.md, TDD_YouTube_Resume.md, UX_Spec_YouTube_Resume.md, DECISIONS.md |
+| **Companion Documents** | ROADMAP_v4.md, TDD_YouTube_Resume.md, UX_Spec_YouTube_Resume.md, DECISIONS.md |
 
 ---
 
@@ -40,6 +40,20 @@
 | C13 | Storage schema advances to v3 (adds optional `pinned`) | §7.3, §7.5 |
 | C14 | §6.1 project structure and §6.3 manifest snippet corrected to include `utils/debugLogger.js`, which has shipped since v2.0.0 but was omitted from both | §6.1, §6.3 |
 | C15 | Non-Goals reaffirmed for v3.0 — no change to which items are in or out of scope; settings page (removed as a non-goal in v2.0) remains in scope | §3.2 |
+
+## Changelog — v3.0.0 → v4.0.0
+
+| # | Change | Section |
+|---|---|---|
+| C16 | Resume reliability restated as explicit product guarantees: success is reported only after a verified outcome, and a failed resume never overwrites the saved checkpoint with a startup position | §5.10 |
+| C17 | Completion redefined: a video counts as finished only when playback actually reached the end, separately from the resume cutoff; the displayed percentage no longer rounds up to 100% | §5.10 |
+| C18 | Bulk removal of completed videos added to the saved videos panel, preserving pinned entries by default | §5.12 (new) |
+| C19 | "Treat as finished at" gains a fourth option, "Only at the end" | §5.8, §5.10 |
+| C20 | Explicit timestamp links take precedence over saved progress | §5.13 (new) |
+| C21 | Storage writes are serialized so concurrent tabs cannot lose entries | §5.10, §6.1, §6.3 |
+| C22 | Storage schema advances to v4 (adds optional `ended`, `revision`, `owner`) | §7.3 |
+| C23 | §6.1 project structure and §6.3 manifest snippet corrected to include `background/storageWriter.js` and the `background.service_worker` manifest key; adds no permission and no network capability | §6.1, §6.3, §10.3 |
+| C24 | Non-Goals reaffirmed for v4.0 — no change to which items are in or out of scope; the background service worker is an architecture change, not a scope change | §3.2 |
 
 ---
 
@@ -71,6 +85,8 @@ The product philosophy is **invisible until needed, reliable always**.
 v2.0.0 is a reliability and control release. v1.0 established the mechanism; v2.0 makes it dependable, makes its two in-player surfaces match YouTube's current design language, and gives the user two things they asked for: a way to see what has been saved, and a way to adjust the thresholds that were previously hard-coded.
 
 v3.0.0 is a trust and curation release. It resolves three defects reported against v2.0.0 that undermined the core promise — resume breaking on a title change, storage filling with untitled duplicate entries, and a saved position occasionally being silently overwritten with a near-zero value — and adds pinning, so a user with a long saved-videos list can guarantee specific entries survive the 200-entry cap indefinitely.
+
+v4.0.0 is a reliability and correctness release, following a full extension audit. Resume success is now reported only after it is actually verified, never assumed; a failed resume can no longer overwrite a saved checkpoint. "Finished" is redefined to mean playback genuinely reached the end, decoupled from the resume cutoff, which in turn makes bulk removal of completed videos possible. Concurrent tabs saving progress at the same time can no longer lose each other's writes. Explicit timestamp links now take defined precedence over saved progress.
 
 ---
 
@@ -127,7 +143,7 @@ A persistent, local, session-agnostic resume mechanism closes this gap entirely.
 
 > **G3 and G10 are not in conflict.** Defaults must remain correct for a user who never opens settings. Settings are an escape hatch, not a setup step.
 
-### 3.2 Non-Goals (v3.0)
+### 3.2 Non-Goals (v4.0)
 
 | # | Non-Goal | Rationale |
 |---|---|---|
@@ -147,6 +163,8 @@ A persistent, local, session-agnostic resume mechanism closes this gap entirely.
 > **NG4 (no settings page) is removed in v2.0 and stays removed in v3.0.** A settings surface shipped as a panel inside the popup rather than a separate options page, and remains in scope — it is not a non-goal being reconsidered. See §5.8.
 >
 > **Unchanged for v3.0:** cross-device sync (NG1), resume for Shorts/live/embed (NG2), analytics or telemetry (NG5), and Firefox/Safari support (NG6) all remain non-goals. Pinning (§5.11) does not reopen any of these — it is additive to the existing local-storage model.
+
+> **Unchanged for v4.0:** cross-device sync (NG1), resume for Shorts/live/embed (NG2), analytics or telemetry (NG5), and Firefox/Safari support (NG6) all remain non-goals, unaffected by v4.0's reliability and completion work. The background service worker introduced in v4.0 (§6.1, §6.3) is an architecture change to how storage writes are serialized, not a scope change — it adds no permission, no network capability (§10.3), and no user-facing capability of its own.
 
 ---
 
@@ -386,7 +404,7 @@ Six settings, presented as a panel inside the extension popup (not a separate op
 | Setting | Effect | Options | Default |
 |---|---|---|---|
 | Minimum watch time | Videos watched for less than this are neither saved nor resumed | 10s / 30s / 1m / 2m | 30s |
-| Treat as finished at | Videos watched past this fraction do not resume | 90% / 95% / 98% | 95% |
+| Treat as finished at | Videos watched past this fraction do not resume | 90% / 95% / 98% / Only at the end *(v4.0)* | 95% |
 | Rewind on resume | Seconds subtracted from the saved position when resuming | Off / 2s / 5s / 10s | 2s |
 | Show "Resumed from" message | Whether the resume toast appears | On / Off | On |
 | Show Restart button | Whether the Restart button appears | On / Off | On |
@@ -399,6 +417,8 @@ Six settings, presented as a panel inside the extension popup (not a separate op
 - A missing, corrupt, or unreadable settings value falls back to its default silently — a settings failure must never block a resume
 - Controls are preset choices (segmented buttons and toggles) rather than free numeric entry, eliminating invalid states
 - Changes apply on the next navigation in any open YouTube tab (NG7)
+
+*(v4.0)* **"Only at the end"** suppresses resume only once a video has genuinely finished (§5.10), rather than at any percentage-of-duration threshold — see §5.10 for what "finished" means.
 
 **Deliberately not configurable:** the 400ms resume delay, the 5-second save interval, and the 200-entry storage cap.
 
@@ -456,6 +476,33 @@ near-zero value arising from any other condition — a bug, a timing issue, an u
 anything else. This is G13 and holds regardless of which specific mechanism Phase 0 finds responsible
 for defect D-C.
 
+**Resume reliability guarantees *(new in v4.0)*:** Resume success is reported to the user — and to any
+UI that depends on it (§5.6) — only after the outcome has been verified, never on the assumption that
+a seek instruction was accepted. A resume attempt that fails, at any stage, must never overwrite the
+saved checkpoint with the video's unresumed startup position; the last genuine saved position always
+survives a failed resume, so the user never loses recoverable progress because an attempt to restore
+it went wrong.
+
+**Completion, redefined *(new in v4.0)*:** "Finished" and "resumable" are two different, independently
+tracked facts about a video. The resume cutoff (`completionThreshold`, §5.8) governs only whether
+resume is offered near the end of a video — it has never meant, and still does not mean, that the
+video was actually watched to completion. A video is **finished** only when playback genuinely reached
+its end. The saved videos panel's displayed watched-percentage (§5.9) no longer rounds up to 100% for
+a video that was merely close to the end; it shows 100% only for a video that actually finished. This
+distinction is what makes bulk removal of completed videos (§5.12) safe: it operates on "finished,"
+never on "past the resume cutoff" or "displays near 100%."
+
+For videos saved before this distinction existed, a conservative fallback applies: such an entry is
+treated as finished only if its saved position is within the smallest unit the existing integer-second
+storage can represent of its duration — never by the resume cutoff or the rounded displayed
+percentage. Erring toward **not** counting a legacy video as finished is the safe direction, since the
+user can still remove it individually.
+
+**Storage write durability *(new in v4.0)*:** Saved progress, deletions, pins, and settings changes
+from multiple open YouTube tabs are never lost to each other. Two tabs saving progress around the same
+time each end up reflected in storage — neither write silently disappears because the other happened
+first, last, or concurrently.
+
 ### 5.11 Pinned Videos *(new in v3.0)*
 
 Users can pin a saved video from the saved videos panel (§5.9) to protect it from automatic removal.
@@ -468,18 +515,56 @@ Users can pin a saved video from the saved videos panel (§5.9) to protect it fr
 - **"Clear saved progress" in settings removes pinned videos too.** Pinning protects against the automatic 200-entry cap; it is not an exemption from an explicit, user-initiated deletion of all saved data
 - Pinning requires no new permission and issues no network request
 
+### 5.12 Bulk Removal of Completed Videos *(new in v4.0)*
+
+The saved videos panel (§5.9) gains a "Remove completed" action alongside the existing single-row
+remove and "Clear saved progress" controls.
+
+**Requirements:**
+- Removes every saved video that is **finished** (§5.10) — never videos that are merely past the
+  resume cutoff or displaying a percentage close to 100%
+- **Pinned videos are preserved by default.** A separate, explicit opt-in is required to include
+  pinned videos in the removal
+- Before anything is removed, the user sees the exact count of videos that will be removed, reflecting
+  the current preserve-pins/include-pins choice
+- The action is a single confirmation step, consistent with the panel's existing remove and
+  clear-all controls — it does not introduce a new confirmation pattern
+- The action either removes the full eligible set or removes nothing; a partial removal is never left
+  visible to the user
+- There is no undo. Once confirmed, removal is final, consistent with the panel's existing single-row
+  remove and "Clear saved progress" controls, neither of which offers undo today
+- Requires no new permission and issues no network request
+
+### 5.13 Timestamp Link Precedence *(new in v4.0)*
+
+YouTube watch URLs can carry an explicit timestamp (`t=` parameter) set by whoever shared the link —
+the creator, another viewer, or the user themselves — separately from anything this extension has
+saved for that video.
+
+**Requirements:**
+- A valid, explicit timestamp in the URL takes precedence over any saved progress for that video.
+  Automatic resume does not run for that navigation
+- Playback that results from an explicit timestamp is treated as an ordinary viewing session: it is
+  tracked and saved normally (§5.4), and does not receive any special protection beyond that
+- An absent or malformed timestamp parameter has no effect — resume behaves exactly as it does today
+  (§5.5)
+- This precedence rule requires no new permission and issues no network request
+
 ---
 
 ## 6. Technical Architecture
 
 ### 6.1 Project Structure
 
-> Corrected in v2.0 to match shipped code. The v1.0 PRD listed a superseded layout (`youtube.js`, `storage.js`) that was never built. **Corrected again in v3.0:** `utils/debugLogger.js` had shipped since v2.0.0 (Phase 1 instrumentation) but was missing from this tree and from §6.3's manifest snippet.
+> Corrected in v2.0 to match shipped code. The v1.0 PRD listed a superseded layout (`youtube.js`, `storage.js`) that was never built. **Corrected again in v3.0:** `utils/debugLogger.js` had shipped since v2.0.0 (Phase 1 instrumentation) but was missing from this tree and from §6.3's manifest snippet. **Corrected again in v4.0:** a `background/` directory is added — the extension's first background service worker (§6.3, §10.3).
 
 ```
 youtube-resume/
 │
 ├── manifest.json
+│
+├── background/
+│   └── storageWriter.js        # Sole writer of every chrome.storage.local mutation; serializes writes across tabs
 │
 ├── content/
 │   ├── bootstrap.js            # Entry point; wires all modules together
@@ -520,7 +605,8 @@ youtube-resume/
 | `playerObserver.js` | Resolves the `<video>` element, waiting for `#movie_player` if necessary. Exposes ad state. Owns the single `MutationObserver`. |
 | `resumeManager.js` | Validates against settings, gates on ad state, applies the 400ms delay, seeks, and verifies. *(v3.0)* Re-asserts the seek once, 500ms after the initial one, in case a native YouTube resume raced and overrode it (G13/D-090). |
 | `progressTracker.js` | Owns the single `setInterval` and all playback event listeners. Captures the video title and channel name on save. *(v3.0)* Starts disarmed on every load and only arms once the resume attempt resolves, so a resume-triggered seek is never mistaken for a user write; rejects an interval-triggered save that jumps backward more than 30s without a preceding seek (G13/D-066/D-090). |
-| `storageManager.js` | The **only** module that touches `chrome.storage.local`. Owns watch data, settings, eviction, and schema migration. |
+| `storageManager.js` | The module every other module calls for watch data, settings, eviction, and schema migration. Reads `chrome.storage.local` directly. *(v4.0)* Mutations route through `storageWriter.js` (below), which is the only module that writes to `chrome.storage.local`; `storageManager.js`'s own API is unchanged. |
+| `storageWriter.js` *(v4.0)* | Background service worker. The sole writer for every `chrome.storage.local` mutation (§6.3). Serializes writes so concurrent tabs cannot lose entries (§5.10). |
 | `uiInjector.js` | Injects and tears down the Restart button and resume toast. `document.createElement` only. |
 | `debugLogger.js` | Gated debug logging, `[YTResume]`-prefixed. No-ops when `DEBUG` is `false`; no other module makes ad hoc `console.log` calls. |
 | `youtubeUtils.js` | Pure URL and page-type inspection, plus video title and channel name extraction |
@@ -533,10 +619,13 @@ youtube-resume/
 {
   "manifest_version": 3,
   "name": "YouTube Resume",
-  "version": "3.0.0",
+  "version": "4.0.0",
   "description": "Automatically resume YouTube videos exactly where you left off.",
   "permissions": ["storage"],
   "host_permissions": ["https://www.youtube.com/*"],
+  "background": {
+    "service_worker": "background/storageWriter.js"
+  },
   "action": {
     "default_popup": "popup/popup.html"
   },
@@ -568,6 +657,8 @@ youtube-resume/
 
 **Permissions must not change in v2.0.** No `tabs`, no `unlimitedStorage`, no additional host permissions. Thumbnails load as ordinary images and require none.
 
+**Permissions must not change in v4.0 either.** The `background.service_worker` key added above (§10.3) is a manifest structure change, not a permission — it requires no new entry in `permissions` or `host_permissions`, and issues no network request of its own.
+
 ---
 
 ## 7. Data Model & Storage
@@ -591,7 +682,7 @@ youtube-resume/
 
 > Schema version and settings are **separate root keys**, never nested inside `youtubeResume`. That object's keys are counted for the 200-entry cap and iterated during eviction; any non-videoId key inside it would corrupt both.
 
-### 7.3 Data Schema — v3
+### 7.3 Data Schema — v4
 
 ```typescript
 type VideoProgress = {
@@ -601,11 +692,14 @@ type VideoProgress = {
   title?: string;     // v2.0 — video title, max 200 chars, optional
   channel?: string;   // v2.0 (post-Phase-8 polish) — channel/uploader name, max 200 chars, optional
   pinned?: boolean;   // v3.0 — user-set; absent/false = unpinned; see §5.11
+  ended?: boolean;    // v4.0 — true only when playback genuinely reached the end; absent/false = not finished; see §5.10
+  revision?: number;  // v4.0 — increments on every write to this entry; absent = never written under the v4 schema
+  owner?: string;     // v4.0 — opaque identifier of the tab/session that most recently wrote this entry; display-only, never used for lookup
 };
 
 type Settings = {
   minWatchSeconds: number;       // default 30
-  completionThreshold: number;   // default 0.95
+  completionThreshold: number;   // default 0.95; v4.0 — also accepts 1, meaning the fourth "Only at the end" option (§5.8)
   rewindSeconds: number;         // default 2
   showToast: boolean;            // default true
   showRestartButton: boolean;    // default true
@@ -618,7 +712,9 @@ enforced identity for a `youtubeResume` entry — the only value ever used as it
 any equality/lookup check. `title` and `channel` are refreshed, display-only metadata: they are
 never read for lookup, comparison, or key derivation anywhere in the codebase, so a title change
 (e.g. a creator editing it after upload) can never create a duplicate entry or break resume for the
-same video.
+same video. **Unchanged in v4.0:** `ended`, `revision`, and `owner` are likewise never used for
+lookup, comparison, or key derivation — the video ID remains the only identity a `youtubeResume`
+entry has.
 
 **Example stored value:**
 
@@ -630,7 +726,10 @@ same video.
       "duration": 2120,
       "updated": 1710000000,
       "title": "Building a UE5 game from scratch",
-      "channel": "Some Game Dev Channel"
+      "channel": "Some Game Dev Channel",
+      "ended": false,
+      "revision": 7,
+      "owner": "tab-4f2a"
     }
   },
   "youtubeResumeSettings": {
@@ -641,7 +740,7 @@ same video.
     "showRestartButton": true,
     "loadThumbnails": true
   },
-  "youtubeResumeSchema": 3
+  "youtubeResumeSchema": 4
 }
 ```
 
@@ -700,6 +799,14 @@ v3 "Phase 0 Findings"):
 chain above, not in Phase 2's repair work. Also purely additive: `pinned` is optional and every
 existing entry is valid without it (absent = unpinned). No entry is rewritten by the migration step
 itself; `pinned` is only ever set by an explicit pin action (§5.11).
+
+**Schema Migration — v3 → v4 (Roadmap v4):** the version bump — `ended`, `revision`, and `owner` added,
+`youtubeResumeSchema` advanced to 4 — is purely additive: all three fields are optional and every
+existing entry remains valid without them. An entry with no `ended` field is not assumed unfinished
+outright; it falls back to the conservative legacy-inference rule described in §5.10 (finished only if
+its saved position is within the smallest unit the existing integer-second storage can represent of
+its duration). No entry is rewritten by the migration step itself; `ended`, `revision`, and `owner` are
+set only by ordinary playback and save activity going forward.
 
 ---
 
@@ -805,6 +912,11 @@ This must be stated plainly in the privacy policy and the store listing. Do not 
 
 No other permission is requested. The extension does not request `tabs`, `history`, `cookies`, `identity`, `unlimitedStorage`, or any other permission. **v2.0 adds no permissions.**
 
+**v4.0 adds no permissions either.** The background service worker introduced at §6.1/§6.3
+(`background/storageWriter.js`) runs under the extension's existing `storage` permission — background
+service workers require no permission of their own to be declared in a manifest. It issues no network
+request of any kind, matching the content script's zero-network policy (§9).
+
 ### 10.4 Security Considerations
 
 - Content script is isolated from the page's JavaScript context
@@ -896,6 +1008,16 @@ Full phase-by-phase test tables are in ROADMAP_v2.md. This section defines the c
 | R15 | All five project documents consistent with shipped code |
 | R16 | Defects D-A, D-B, and D-C (§5.10) no longer reproduce; a saved position is never replaced by a near-zero position the user did not cause (G13) |
 | R17 | At most 20 pinned videos exist at any time; pinned videos are never evicted by the 200-entry cap (G12) |
+| R18 | Resume success is reported only after a verified outcome; a failed resume never overwrites the saved checkpoint with the video's startup position (§5.10) |
+| R19 | A video is treated as finished only when playback genuinely reached its end; the panel's displayed percentage no longer rounds up to 100% for a video that merely came close (§5.10) |
+| R20 | "Remove completed" removes only finished videos, preserves pinned entries by default, and previews the exact count before acting (§5.12) |
+| R21 | "Treat as finished at" offers a fourth "Only at the end" option and persists it like the existing three (§5.8) |
+| R22 | An explicit, valid timestamp link takes precedence over saved progress for that navigation (§5.13) |
+| R23 | Concurrent saves from multiple open tabs never lose an entry (§5.10) |
+| R24 | Permissions unchanged from v3.0; the new background service worker requests no permission and issues no network request (§10.3) |
+| R25 | Manifest V3 compliance verified; version reads `4.0.0` |
+| R26 | Storage schema reads v4; every existing v1–v3 entry remains valid without `ended`, `revision`, or `owner` (§7.3, §7.6) |
+| R27 | All project documents consistent with shipped code |
 
 ---
 
@@ -922,7 +1044,7 @@ Out of scope for v2.0.
 
 ### 14.1 Key Technical Constraints
 
-- **Manifest V3:** no background script required; all logic runs in the content script and popup
+- **Manifest V3:** through v3.0, no background script was required; all logic ran in the content script and popup. **v4.0** adds a background service worker (`background/storageWriter.js`, §6.1, §6.3) as the sole writer of `chrome.storage.local` mutations — an architecture change, not a permission or scope change (§3.2, §10.3)
 - **SPA architecture:** no page reload on navigation; all state manually torn down and re-initialized
 - **Player initialization race:** YouTube's player can override `video.currentTime` if set too early. The 400ms delay is required, and in v2.0 the seek is additionally verified
 - **Shared video element:** ads and main content use the same `<video>`. `currentTime` during an ad reflects ad position. This is the single most important correctness constraint in the resume path
