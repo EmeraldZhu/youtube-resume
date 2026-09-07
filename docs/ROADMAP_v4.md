@@ -9,7 +9,7 @@
 | **Document Type** | Release Roadmap |
 | **Target Version** | 4.0.0 |
 | **Previous Version** | 3.0.0 (live on Chrome Web Store) |
-| **Status** | Draft — Not Started |
+| **Status** | Phase 0 AWAITING VERIFICATION |
 | **Last Updated** | 2026-09-08 |
 | **Companion Documents** | PRD_YouTube_Resume.md (3.0.0), UX_Spec_YouTube_Resume.md (3.0.0), TDD_YouTube_Resume.md (3.0.0), EXTENSION_AUDIT_2026-09-07.md, DECISIONS.md |
 
@@ -101,25 +101,25 @@ just another unverified claim, which is the exact failure mode F21 documents.
 
 ### Tasks
 
-- [ ] 0.1 — Create `tests/` with a dependency-free Node harness (same technique the audit used: `vm`
+- [x] 0.1 — Create `tests/` with a dependency-free Node harness (same technique the audit used: `vm`
   executing real, unmodified source files against controlled mocks — no test runner, no npm
   dependency, matching CLAUDE.md's no-dependencies convention extended to test tooling).
-- [ ] 0.2 — Build shared fixtures: a mock `chrome.storage.local` (get/set/remove with realistic async
+- [x] 0.2 — Build shared fixtures: a mock `chrome.storage.local` (get/set/remove with realistic async
   timing), a mock video element (`currentTime`, `duration`, `seeking`, `readyState`, dispatchable
   events), fake timers, and a mock DOM sufficient for `navigationManager`/`playerObserver`.
-- [ ] 0.3 — Port all 24 appendix checks (R1–R24) from the audit into committed, individually named
+- [x] 0.3 — Port all 24 appendix checks (R1–R24) from the audit into committed, individually named
   test cases (e.g. `tests/r01-success-before-outcome.js` or one runner file with 24 named cases —
   Tier 1, pick either as long as each case is independently identifiable in output).
-- [ ] 0.4 — Run the harness against current HEAD. Record, per case, whether it still reproduces the
+- [x] 0.4 — Run the harness against current HEAD. Record, per case, whether it still reproduces the
   documented defect, does not reproduce, or reproduces via a different mechanism than the audit
   described.
-- [ ] 0.5 — Write results into a new "Phase 0 Findings" subsection immediately below this phase (not a
+- [x] 0.5 — Write results into a new "Phase 0 Findings" subsection immediately below this phase (not a
   separate file), one row per R1–R24, with verdict and evidence — same format Roadmap v3's Phase 0
   Findings used.
-- [ ] 0.6 — Document the harness invocation (a single `node tests/run.js` or equivalent) directly in
+- [x] 0.6 — Document the harness invocation (a single `node tests/run.js` or equivalent) directly in
   this roadmap's Phase 0 Findings, so a future phase or session can re-run it without rediscovery.
-- [ ] 0.7 — Note (for Phase 9 to act on) that `tests/` must be excluded from the Chrome Web Store zip.
-- [ ] 0.8 — Confirm `DEBUG` is `false` in the committed code and this phase touches no production file.
+- [x] 0.7 — Note (for Phase 9 to act on) that `tests/` must be excluded from the Chrome Web Store zip.
+- [x] 0.8 — Confirm `DEBUG` is `false` in the committed code and this phase touches no production file.
 
 ### Tests
 
@@ -132,9 +132,9 @@ just another unverified claim, which is the exact failure mode F21 documents.
 
 ### Exit Criteria
 
-- [ ] `tests/` is committed with a runnable, dependency-free harness reproducing R1–R24
-- [ ] Every one of R1–R24 has a recorded verdict in the Phase 0 Findings subsection below
-- [ ] `DEBUG` is `false`; no functional behaviour changed from v3.0.0
+- [x] `tests/` is committed with a runnable, dependency-free harness reproducing R1–R24
+- [x] Every one of R1–R24 has a recorded verdict in the Phase 0 Findings subsection below
+- [x] `DEBUG` is `false`; no functional behaviour changed from v3.0.0
 
 ### Docs to Update
 
@@ -145,9 +145,76 @@ just another unverified claim, which is the exact failure mode F21 documents.
 
 ## Phase 0 Findings
 
-*(To be completed when Phase 0 executes. Format: one row per R1–R24, verdict — Confirmed /
-Not reproduced / Confirmed via different mechanism — plus log evidence and affected file/line, matching
-Roadmap v3's Phase 0 Findings precedent.)*
+**Harness invocation (0.6):** `node tests/run.js` from the repo root — no install step, no
+dependencies, Node built-ins only (`fs`, `path`, `vm`). Add `--json` for machine-readable output. Ran
+against current HEAD (`da8fa14` plus this phase's own `tests/` addition — no production file changed).
+Determinism (T0.4) confirmed: two consecutive runs (`--json`) produced byte-identical output.
+
+**Design:** `tests/lib/harness.js` loads the real, unmodified source files (manifest
+`content_scripts` order, `storage/storageManager.js` first) into a fresh Node `vm` context per test,
+against a fake DOM (`tests/lib/fakeDom.js`), a fake `chrome.storage.local` (`tests/lib/mockChromeStorage.js`,
+async via the fake clock so read/write races reproduce like the real API), a virtual clock replacing
+`setTimeout`/`setInterval`/`Date.now()` (`tests/lib/fakeClock.js`, so the 400ms/250ms/500ms/5s/10s/60s
+delays run instantly and deterministically), and a minimal `<video>` stand-in
+(`tests/lib/mockVideo.js`). Same technique the audit used (`EXTENSION_AUDIT_2026-09-07.md`: "an
+isolated Node vm experiment executed the actual source"), now committed per D-108. `tests/cases/`
+holds one file per R-case (`r01-*.js` … `r24-*.js`), each exporting `{ id, title, finding, run() }`;
+`run()` returns `{ verdict, evidence }`. `tests/run.js` discovers and runs them all.
+
+**All 24 appendix cases (R1–R24) still reproduce against current HEAD** — none have been fixed yet,
+which is expected: this phase makes zero behavior changes.
+
+| Case | Verdict | Finding | Evidence |
+|---|---|---|---|
+| R1 | Reproduces | F01 | Toast shown for the target position while `video.seeking=true`, `readyState=1` — `seekWithVerification()` never checks either. |
+| R2 | Reproduces | F01 | A native jump to 120s after `tryResume()` resolves goes uncorrected for 10s — nothing monitors post-verification. |
+| R3 | Reproduces | F01 | The post-verify corrective re-seek throws; a warning is logged AND the success toast still shows; position stays at the overridden value. |
+| R4 | Reproduces | F08 | A forward native jump to 120s mid-delay cancels resume outright — no seek to the saved checkpoint occurs at all. |
+| R5 | Reproduces | F04 | `shouldResume(3600, 30, ...)` fails and returns before `isAdPlaying()` is ever consulted — eligibility runs against the ad's own duration. |
+| R6 | Reproduces | F02 | Both 5s metadata waits (D-038's retry) time out; metadata arriving afterward has no effect — position stays 0. |
+| R7 | Reproduces | F05 | A tracker armed per bootstrap's unconditional `finally` overwrites a 3600s checkpoint with 60s on its first interval save. |
+| R8 | Reproduces | F05 | A native jump to 120s plus `seeked` saves 120s — event triggers bypass the backward-jump guard entirely (`bypassDelta=true`). |
+| R9 | Reproduces | F08 | A below-minimum rewind's `seeked` save doesn't reset `lastSavedTime`; the next legitimate interval save is then rejected as a false backward jump. |
+| R10 | Reproduces | F09 | `stop()` at 104s with no prior save performs no flush — the sample is silently dropped. |
+| R11 | Reproduces | F02 | Same-URL navigate-finish, visibilitychange, pageshow, and poll ticks: `onVideoChange` fires exactly once (cold load only). |
+| R12 | Reproduces | F03 | `disconnect()` on a pending `waitForVideo()` clears the timeout without settling the promise — still pending 20s later. |
+| R13 | Reproduces | F06 | Two concurrent saves for different IDs: only one entry survives the whole-object read-modify-write race. |
+| R14 | Reproduces | F06 | Concurrent delete-A/save-B: B's write (sourced from the pre-delete snapshot) resurrects A. |
+| R15 | Reproduces | F11 | Repair-merging a pinned canonical entry with a whitespace-duplicate key drops `pinned` — `mergeEntryPair()` never copies it. |
+| R16 | Reproduces | F11 | The invalid 12-char key `aaaaaaaaaaab` is rewritten to the unproven, different 11-char key `aaaaaaaaaaa`. |
+| R17 | Reproduces | F12 | One `null` library row makes an otherwise-healthy `saveProgress()` reject (`Cannot read properties of null (reading 'pinned')`) during eviction's filter. |
+| R18 | Reproduces | F12 | `minWatchSeconds: "broken"`, `showToast: "false"` both pass through `getSettings()` unvalidated. |
+| R19 | Reproduces | F06 | Concurrent `saveSettings()` calls (rewind vs. toast): the rewind change is lost, the toast change survives. |
+| R20 | Reproduces | F13 | Unpinning the one pinned entry out of a 200-unpinned-plus-1-pinned library leaves 201 unpinned entries — the cap isn't rechecked until the next save. |
+| R21 | Reproduces | F03 | A's settings read, deferred past B's full initialization, still resolves and replaces B as the active tracker — no generation check. |
+| R22 | Reproduces | F03 | A's resume completing calls the global `arm()`, arming B's tracker (B is now the active one) while B's own resume is still pending. |
+| R23 | Reproduces | F07 | A stale tab's hidden-event save (120s) overwrites a fresher shared checkpoint (3600s) — no writer-ownership/freshness check. |
+| R24 | Reproduces | F10 | A rejected pause save at 1100s still advances `lastSavedTime`; 20 later ticks at the same position never retry (delta guard masks it). |
+
+**Findings this phase could not independently confirm beyond the audit's own evidence tier** (all
+already labeled by the audit as something other than "Reproduced," carried forward unchanged, not
+re-litigated): F14–F21 have no R-case (F14/F15/F20 are product-gap/policy-gap findings with no
+existing behavior to reproduce; F16–F19 are popup-layer findings the audit itself marked
+code-confirmed-not-reproduced, live-untested, or not-browser-reproduced; F21 is the meta-finding this
+phase directly addresses by existing). Nothing the audit marked "Reproduced" failed to reproduce here.
+
+**Packaging procedure (0.7 — for Phase 9 to execute and confirm at 9.5):** no zip build script existed
+in the repo before this phase (`docs/Dev_Checklist_YouTube_Resume.md` §12.6 only checklists "zipped and
+loadable," with no command). Documenting one here rather than leaving Phase 9 to invent it ad hoc: zip
+an explicit include-list of shipped paths, so `tests/` and `docs/` are excluded by construction (never
+listed) rather than by a fragile exclude pattern:
+
+```bash
+zip -r youtube-resume-v4.0.0.zip manifest.json assets content storage utils popup background
+```
+
+(`background/` is included pre-emptively for Phase 2's planned service worker, D-102; harmless if the
+directory doesn't exist yet when this is run before Phase 2 lands — `zip` skips a missing path with a
+warning, doesn't fail the build. Re-verify the include-list against the actual shipped tree at Phase 9.)
+
+**DEBUG confirmed `false`** in `utils/debugLogger.js` (unchanged this phase). `git diff` shows no
+changes to any file under `content/`, `storage/`, `utils/`, `popup/`, or `manifest.json` — only
+`tests/` (new) and this roadmap/the state summary/decisions ledger (doc updates) changed.
 
 ---
 
@@ -667,7 +734,8 @@ doc describes what actually shipped, and the release is ready to submit to the C
 - [ ] 9.3 — Confirm exactly one `setInterval` and one `MutationObserver` alive at any time, across
   every scenario in the regression matrix below.
 - [ ] 9.4 — Bump `manifest.json` version to `4.0.0`.
-- [ ] 9.5 — Exclude `tests/` from the Chrome Web Store zip; confirm the zip build step does so.
+- [ ] 9.5 — Exclude `tests/` from the Chrome Web Store zip; confirm the zip build step does so (see the
+  packaging procedure documented in Phase 0 Findings below — 0.7).
 - [ ] 9.6 — Full copy audit against UX Spec §7, including CP-68+.
 - [ ] 9.7 — Reconcile PRD, UX Spec, and TDD against everything Phases 0–8 actually shipped (background
   writer architecture, completion field, fourth threshold option, Remove Completed, accessibility

@@ -12,7 +12,7 @@ below are planning only — no code written yet.
 
 | Phase | Name | Status | Blocked By |
 |---|---|---|---|
-| 0 | Reproduction & Harness Foundation | NOT STARTED | — |
+| 0 | Reproduction & Harness Foundation | AWAITING VERIFICATION | — |
 | 1 | Boundary Validation & Safe Repair | NOT STARTED | — |
 | 2 | Serialized Storage Writer | NOT STARTED | — |
 | 3 | Write Ownership, Freshness & Durable Saves | NOT STARTED | — |
@@ -25,11 +25,12 @@ below are planning only — no code written yet.
 
 Ship gates: A after Phase 3 (storage correctness), B after Phase 6 (resume reliability), C after
 Phase 8 (product completeness). Phases 0–3 are independently releasable (Roadmap v4 §3). Key
-decisions logged D-100–D-116: background service worker as sole storage writer (D-102), per-video
+decisions logged D-100–D-126: background service worker as sole storage writer (D-102), per-video
 keys rejected (D-103), additive `ended` completion field + legacy inference rule (D-104), "Remove
 completed" behavior (D-105), fourth completion-threshold option (D-106), `t=` timestamp precedence
-(D-107), committed `tests/` regression harness (D-108). UX Spec 4.0.0 copy IDs CP-68–CP-79 now
-assigned (D-110); CP-80 is the next free ID.
+(D-107), committed `tests/` regression harness (D-108, DONE — built Phase 0), store-zip include-list
+packaging procedure (D-126). UX Spec 4.0.0 copy IDs CP-68–CP-79 now assigned (D-110); CP-80 is the
+next free ID.
 
 ## Prior releases (shipped, owner-confirmed DONE)
 
@@ -45,8 +46,12 @@ A phase is `DONE` only when the owner confirms it. Claude Code never writes `DON
 
 ## Next action
 
-Begin Roadmap v4 Phase 0 (Reproduction & Harness Foundation) when work resumes. Nothing is
-blocking — see `docs/DECISIONS.md` "Currently blocking" for the one open, non-blocking item (D-034).
+Phase 0 done this session: `tests/` harness committed (`node tests/run.js`, zero dependencies), all
+24 R1–R24 cases reproduce against current HEAD (`docs/PHASE0_FINDINGS_v4.md`,
+`docs/ROADMAP_v4.md` Phase 0 Findings), phase prompt set saved (`docs/PHASE_PROMPTS_v4.md`). No
+production file changed. Begin Phase 1 (Boundary Validation & Safe Repair) next, using
+`docs/PHASE_PROMPTS_v4.md`'s Phase 1 prompt after `/clear`. Nothing is blocking — see
+`docs/DECISIONS.md` "Currently blocking" for the one open, non-blocking item (D-034).
 
 ## Doc versions
 
