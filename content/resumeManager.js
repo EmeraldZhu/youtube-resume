@@ -345,8 +345,39 @@ const resumeManager = (() => {
   }
 
   /**
-   * Validates saved progress against resume conditions and
-   * executes the seek if conditions are met.
+   * Phase 6 (D-1xx/F02/R6) — a metadata wait that times out (both of
+   * D-038's 5s waits elapsed with no valid duration) no longer ends the
+   * attempt outright. The checkpoint stays eligible: a one-shot
+   * 'loadedmetadata' listener is registered, and if real metadata does
+   * arrive later, the resume pipeline picks up from eligibility evaluation
+   * exactly as if the wait had succeeded the first time. isCurrent() is
+   * re-checked at listener-fire time, so a superseded navigation's
+   * late-arriving metadata is silently ignored.
+   */
+  function scheduleDeferredMetadataRecovery(video, saved, videoId, settings, isCurrent, attemptId, minWatchSeconds, completionThreshold) {
+    const onLoaded = () => {
+      Promise.resolve()
+        .then(async () => {
+          if (!isCurrent()) return;
+          const metadataResult = await establishContentMetadata(video, isCurrent);
+          if (!isCurrent() || !metadataResult.ok) return;
+          const shouldResumeResult = timeUtils.shouldResume(saved.time, video.duration, minWatchSeconds, completionThreshold);
+          debugLogger.log('tryResume:deferredMetadataRecovered', {
+            attemptId,
+            videoDuration: video.duration,
+            shouldResumeResult,
+          });
+          if (!shouldResumeResult) return;
+          await completeResume(video, saved, videoId, settings, isCurrent, attemptId, video.duration);
+        })
+        .catch((err) => console.warn('[YTResume] Deferred resume recovery failed:', err.message));
+    };
+    video.addEventListener('loadedmetadata', onLoaded, { once: true });
+  }
+
+  /**
+   * Validates saved progress against resume conditions and executes the
+   * seek if conditions are met.
    *
    * @param {HTMLVideoElement} video
    * @param {VideoProgress} saved - { time, duration, updated }
@@ -366,9 +397,6 @@ const resumeManager = (() => {
     const attemptId = nextAttemptId();
     const minWatchSeconds = settings.minWatchSeconds ?? 30;
     const completionThreshold = settings.completionThreshold ?? 0.95;
-    const rewindSeconds = settings.rewindSeconds ?? 2;
-    const showToast = settings.showToast ?? true;
-    const showRestartButton = settings.showRestartButton ?? true;
 
     debugLogger.log('tryResume:entry', {
       attemptId,
@@ -399,8 +427,14 @@ const resumeManager = (() => {
     if (!metadataResult.ok) {
       if (metadataResult.reason === 'ad-timeout') {
         console.warn('[YTResume] Resume abandoned: ad did not clear within 60s');
-      } else if (metadataResult.reason === 'metadata-timeout') {
+        return outcome(OUTCOME.FAILED, metadataResult.reason, saved.time, video.currentTime, attemptId);
+      }
+      if (metadataResult.reason === 'metadata-timeout') {
         console.warn('[YTResume] Metadata wait failed:', metadataResult.error.message);
+        // Phase 6 — deferred, not terminal: the checkpoint stays eligible
+        // for a later 'loadedmetadata' event (R6).
+        scheduleDeferredMetadataRecovery(video, saved, videoId, settings, isCurrent, attemptId, minWatchSeconds, completionThreshold);
+        return outcome(OUTCOME.DEFERRED, metadataResult.reason, saved.time, video.currentTime, attemptId);
       }
       return outcome(OUTCOME.FAILED, metadataResult.reason, saved.time, video.currentTime, attemptId);
     }
@@ -417,7 +451,23 @@ const resumeManager = (() => {
       return outcome(OUTCOME.INELIGIBLE, 'not-eligible', saved.time, video.currentTime, attemptId);
     }
 
-    const eligibleDuration = video.duration;
+    return completeResume(video, saved, videoId, settings, isCurrent, attemptId, video.duration);
+  }
+
+  /**
+   * Everything that happens once real, post-ad content metadata is in hand
+   * and eligibility has already passed: the ad-gated resume delay, the
+   * stabilization check, the seek + verification, and the resulting UI.
+   * Split out from tryResume() (Phase 6) so the deferred metadata-recovery
+   * path (scheduleDeferredMetadataRecovery) can reuse it verbatim instead
+   * of duplicating it.
+   *
+   * @returns {Promise<{status, reason, target, observed, attemptId}>}
+   */
+  async function completeResume(video, saved, videoId, settings, isCurrent, attemptId, eligibleDuration) {
+    const rewindSeconds = settings.rewindSeconds ?? 2;
+    const showToast = settings.showToast ?? true;
+    const showRestartButton = settings.showRestartButton ?? true;
 
     debugLogger.log('tryResume:isAdPlaying:beforeWait', {
       attemptId,

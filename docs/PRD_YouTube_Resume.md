@@ -313,6 +313,11 @@ A URL-polling fallback activates if `yt-navigate-finish` has not fired within 2 
 - An advertisement is active (§5.7)
 - `currentTime` is `NaN`, negative, or exceeds `duration`
 - Total watched time is below the configured minimum (§5.8)
+- A seek is currently in flight (`video.seeking === true`) — *(new in v4 Phase 6, 6.7)*: a pending seek is never persisted as a completed position, on any trigger.
+
+> **v4 Phase 6 checkpoint-loss budget (6.8):** the guarantees above assume the page has a chance to run JS — an ordinary tab close, navigation away, or SPA exit flushes the last known-good sample synchronously as part of teardown (`progressTracker.stop()`), so the worst-case loss there is bounded by however long ago that last good sample was captured (at most ~1 poll tick, ≤1s, under normal playback). An **abrupt termination that kills the page process outright — a browser crash, the OS killing the tab, or Chrome force-quitting** — gets no such chance to run teardown code at all. In that case the worst-case loss window is the time since the last successful `setInterval`/event-triggered save actually completed and was acknowledged by the writer (up to 5 seconds under the ordinary cadence, more under a throttled/suspended background tab — see §5.4's tracking-interval table). This is a deliberately bounded, honest budget, not a promise of exact recovery after every kind of termination; PRD/TDD and the roadmap's Phase 6 exit criteria measure ordinary close/reopen and crash/kill/discard separately for exactly this reason (Roadmap v4 Phase 6, T6.6).
+
+> **v4 Phase 6 deferred recovery (6.1/6.2):** a per-video session whose player discovery timed out, or whose resume's metadata wait timed out, is not abandoned outright — it stays eligible to complete automatically on the next meaningful signal: the tab becoming visible, a `pageshow` (bfcache/back-forward restore), the player element being replaced without a video-ID change, or (for a metadata timeout specifically) a later `loadedmetadata` event. A session that already reached normal, successful playback is never re-seeked merely because one of these signals fires (6.4) — recovery only ever acts on a session that never got established in the first place.
 
 ---
 

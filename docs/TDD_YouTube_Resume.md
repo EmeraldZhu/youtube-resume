@@ -429,17 +429,27 @@ to a video URL), this emits with the current `videoId`.
 #### Error Behavior
 - `stop()` must remove all event listeners and clear poll interval
 
+**v4 Phase 6 scope note:** `navigationManager` intentionally still only detects a *video-ID
+change*. Deferred recovery for a session that never established (a stalled player-discovery or
+metadata-wait timeout) is owned by `bootstrap.js`, not this module — see its own recovery
+mechanism (`attemptRecovery()`, wired to `visibilitychange`/`pageshow`) and `playerObserver.js`
+§4.3 below (`watchForReplacement`) for how a player-element replacement is detected without any
+video-ID change at all.
+
 ---
 
 ### 4.3 `playerObserver.js`
 
-**Purpose:** Detect when the `<video>` element is available inside `#movie_player`. Also exposes ad state detection.
+**Purpose:** Detect when the `<video>` element is available inside `#movie_player`. Also exposes ad
+state detection and (v4 Phase 6) a persistent watch for the element being replaced later.
 
 #### Public API
 
 ```typescript
 playerObserver.waitForVideo(): Promise<HTMLVideoElement>
 playerObserver.isAdPlaying(): boolean
+playerObserver.watchForReplacement(callback: (video: HTMLVideoElement) => void): void
+playerObserver.stopWatchingForReplacement(): void
 playerObserver.disconnect(): void
 ```
 
@@ -448,63 +458,65 @@ playerObserver.disconnect(): void
 ```typescript
 let observer: MutationObserver | null = null;
 let timeoutHandle: number | null = null;
+let pendingReject: ((err: Error) => void) | null = null;
+let pendingResolve: ((video: HTMLVideoElement) => void) | null = null;
+let replacementCallback: ((video: HTMLVideoElement) => void) | null = null;
+let lastKnownVideo: HTMLVideoElement | null = null;
 ```
 
 #### Detailed Logic
 
-**`waitForVideo()`:** (rewritten Phase 2, D-023 — v1.0 rejected immediately if
-`#movie_player` was absent, guaranteeing a missed resume on slow cold loads)
+**v4 Phase 6 rewrite (6.1/6.3):** the single `MutationObserver` is now created lazily on first use
+and **never torn down again** — it is re-targeted for every generation's `waitForVideo()` call and
+doubles as the persistent replacement watch, rather than being created fresh and disconnected each
+time. This is what "exactly one MutationObserver alive at any time... re-target, never duplicate"
+means in practice here: there is only ever the one instance, for the life of the content script.
+One shared `handleMutation()` services whichever of the two pending consumers (a `waitForVideo()`
+promise, or a registered replacement callback) applies on any given DOM mutation under
+`document.body`.
 
 ```javascript
-function waitForVideo(): Promise<HTMLVideoElement> {
-  return new Promise((resolve, reject) => {
-    const resolveVideo = () => {
-      const container = document.querySelector('#movie_player');
-      return container ? container.querySelector('video') : null;
-    };
-
-    const existing = resolveVideo();
-    if (existing) { resolve(existing); return; }
-
-    // Observe document.body broadly: covers #movie_player not existing yet
-    // and <video> not existing inside it yet, with one observer.
-    observer = new MutationObserver(() => {
-      const video = resolveVideo();
-      if (video) {
-        observer.disconnect();
-        clearTimeout(timeoutHandle);
-        resolve(video);
-      }
-    });
-
-    observer.observe(document.body, { childList: true, subtree: true });
-
-    timeoutHandle = setTimeout(() => {
-      observer.disconnect();
-      reject(new Error('Timeout: <video> not found after 10s'));
-    }, 10000);
-  });
+function handleMutation() {
+  const video = resolveVideo();
+  if (video && pendingResolve) {
+    // service the pending waitForVideo() call — never both branches at once
+    const resolve = pendingResolve;
+    pendingResolve = null; pendingReject = null;
+    clearTimeout(timeoutHandle); timeoutHandle = null;
+    lastKnownVideo = video;
+    resolve(video);
+    return;
+  }
+  if (replacementCallback && video && video !== lastKnownVideo) {
+    lastKnownVideo = video;
+    replacementCallback(video);
+  }
 }
 ```
 
-**`isAdPlaying()`:**
+**`waitForVideo()`:** unchanged in observable behavior from Phase 2/4 (D-023, R12) — resolves
+immediately if `#movie_player video` already exists, otherwise waits via the shared observer, with
+a 10s timeout that rejects. `ensureObserver()` lazily creates the shared observer on first call and
+never disconnects it.
 
-```javascript
-function isAdPlaying(): boolean {
-  const player = document.querySelector('#movie_player');
-  if (!player) return false;
-  return player.classList.contains('ad-showing') ||
-         player.classList.contains('ad-interrupting');
-}
-```
+**`watchForReplacement(callback)`** *(new, 6.1)*: registers a persistent callback fired whenever the
+resolved `<video>` element's identity changes from the one last seen — a real replacement (e.g. a
+quality/format switch rebuilding the player), not merely a re-render of the same element. Reuses
+the shared observer; does not create a second one. `bootstrap.js` calls this once a generation has
+confirmed its video element, and reacts to a later replacement by re-running the full pipeline for
+the same `videoId`.
 
-**`disconnect()`:**
+**`disconnect()`:** cancels whatever `waitForVideo()` call is pending (rejecting it, not leaving it
+unsettled — R12) and clears the replacement watch. Does **not** tear down the shared
+`MutationObserver` itself (Phase 6) — it stays alive for the next generation. Idempotent.
 
-Disconnects the `MutationObserver` and cancels the timeout. Safe to call even if already disconnected.
+**`isAdPlaying()`:** unchanged.
 
 #### Error Behavior
 - If `#movie_player` is not yet in the DOM, keep observing `document.body` — do not reject (D-023)
-- Only the overall 10s timeout rejects; rejection bubbles up to `bootstrap.js` catch handler
+- Only the overall 10s timeout rejects `waitForVideo()`; rejection bubbles up to `bootstrap.js`'s
+  catch handler, which (v4 Phase 6) marks the video eligible for deferred recovery instead of
+  abandoning it outright
 
 ---
 

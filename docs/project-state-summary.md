@@ -19,7 +19,7 @@ Phases 4–9 are still planning only.
 | 3 | Write Ownership, Freshness & Durable Saves | DONE | — |
 | 4 | Resume Identity & Cancellation | AWAITING VERIFICATION | — |
 | 5 | Verified Resume Outcomes | DONE | — |
-| 6 | Deferred Recovery Lifecycle | NOT STARTED | — |
+| 6 | Deferred Recovery Lifecycle | AWAITING VERIFICATION | — |
 | 7 | Completion Policy & Remove Completed | NOT STARTED | — |
 | 8 | Popup Reconciliation & Accessibility | NOT STARTED | — |
 | 9 | Regression, Docs & Store Release | NOT STARTED | — |
@@ -46,24 +46,26 @@ A phase is `DONE` only when the owner confirms it. Claude Code never writes `DON
 
 ## Next action
 
-Phase 5 AWAITING VERIFICATION: `tryResume()` returns a typed outcome (`resumeManager.OUTCOME`) instead
-of void; seek verification checks `seeking`/`readyState`, not just proximity (R1); a bounded background
-monitor catches a late native override (R2); a thrown corrective re-seek is a typed failure, never a
-swallowed success (R3). The fixed-magnitude jump guard is replaced by a stabilization check gated on
-real input (new `utils/userIntent.js`) — an uncorroborated jump no longer cancels resume outright (R4).
-`progressTracker`'s backward-jump guard now applies to an uncorroborated `'seeked'` too (R8) while still
-letting a corroborated deliberate rewind through regardless of size; its baseline resets on every
-`'seeked'` so a below-minimum rewind doesn't block the next interval save (R9). New
-`protectCheckpoint()`/`markUserDirected()` protect a checkpoint through a non-established outcome (R7)
-and mark a `t=` timestamp navigation (D-107/F20) or established user-directed outcome authoritative.
-Self-verified via `node tests/run.js`: R1/R2/R3/R4/R7/R8/R9 flip to `not-reproduced`; 7 new T5 cases
-pass; zero regressions (46 cases total; R6/R10/R11 remain `reproduces` — Phase 6 scope). Decisions
-D-155–D-166. Nothing else blocking (DECISIONS.md "Currently blocking", D-034, non-blocking).
+Phase 6 AWAITING VERIFICATION (Gate B): a session that never established (player-discovery or
+metadata-wait timeout) now stays recoverable instead of being abandoned. `resumeManager` self-heals a
+metadata timeout via `OUTCOME.DEFERRED` + a one-shot `loadedmetadata` listener (R6). `bootstrap.js`
+re-attempts a player-discovery timeout on `visibilitychange`/`pageshow` (R11, no new timer).
+`playerObserver`'s single `MutationObserver` now stays alive permanently, doubling as a
+`watchForReplacement()` watch for a player-element swap with no video-ID change. `progressTracker.stop()`
+flushes a final sample before teardown, falling back to a `lastGoodSample` cache when mid-seek (R10); a
+new `video.seeking` guard rejects any mid-seek save. Save cadence keeps its 5-tick trigger with a
+wall-clock OR-condition added only for a suspended/throttled tab (a full wall-clock replacement broke
+~10 existing harness cases and was reverted). Checkpoint-loss budget documented in PRD §5.4.
+Self-verified via `node tests/run.js`: R6/R10/R11 flip to `not-reproduced` (R11 rewritten to assert
+recovery at the bootstrap level where the fix lives — D-173); 3 new T6 cases pass; zero regressions (49
+cases total). Decisions D-168–D-174. **Live verification not yet run this session** (frozen/discarded/
+back-forward-restored tabs, multi-tab matrix) — owner checks below. Nothing else blocking.
 
 ## Doc versions
 
 PRD **4.0.0** · UX Spec **4.0.0** · TDD **4.0.0-draft** (§1/§1.2/§2/§4.6 updated for the v4
-service-worker architecture; remaining sections pending per-phase updates) ·
+service-worker architecture; §4.2/§4.3 updated for Phase 6's deferred-recovery lifecycle;
+remaining sections pending per-phase updates) ·
 Roadmap v2 2.0.0 · Roadmap v3 3.0.0 (shipped) · Roadmap v4 (draft).
 
 **Constraint amendment (D-125):** CLAUDE.md's storage-access rule now permits two modules to touch

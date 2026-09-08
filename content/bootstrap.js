@@ -21,6 +21,39 @@
   // genuinely already refreshed for the new content.
   let lastVideoElement = null;
   let lastVideoDuration = null;
+  // Phase 6 (6.1/6.2/F02/F09/R6/R11) — set only when a navigation's player
+  // discovery (playerObserver.waitForVideo()) times out entirely: nothing
+  // was ever set up for this videoId (progressTracker never started), so
+  // there is no tracker to protect or checkpoint to preserve — the whole
+  // pipeline just needs a fresh attempt. Cleared at the top of every
+  // onVideoChange() call and re-set only by that same failure path, so a
+  // session that ever gets further than player discovery (even one whose
+  // resume itself fails/defers) never sets this — resumeManager's own
+  // OUTCOME.DEFERRED (metadata-timeout) already self-heals via a
+  // 'loadedmetadata' listener, and bootstrap.js's existing
+  // protectCheckpoint()/arm() handling already covers every other
+  // non-established outcome. Recovery triggers (attemptRecovery) act on
+  // this only when the page is still on the same video they were set for.
+  let pendingRecoveryVideoId = null;
+
+  /**
+   * Phase 6 (6.1) — re-attempts initialization for a stalled navigation
+   * whose player discovery previously timed out, when a meaningful
+   * page-lifecycle signal (tab became visible, pageshow/bfcache restore)
+   * fires later. A no-op whenever nothing is actually pending, or the page
+   * has since moved to a different video/left the watch page — this must
+   * never re-seek or re-initialize an already-successful session (6.4),
+   * and it never does, because a successful session never sets
+   * pendingRecoveryVideoId in the first place.
+   */
+  function attemptRecovery() {
+    if (!pendingRecoveryVideoId) return;
+    if (!youtubeUtils.isWatchPage()) return;
+    if (youtubeUtils.getVideoId() !== pendingRecoveryVideoId) return;
+    const videoId = pendingRecoveryVideoId;
+    debugLogger.log('bootstrap:recoveryTriggered', { videoId });
+    onVideoChange(videoId).catch(err => console.warn('[YTResume] Recovery attempt failed:', err.message));
+  }
 
   /**
    * Orchestrates the initialization pipeline for a new video load.
@@ -30,6 +63,7 @@
   async function onVideoChange(videoId) {
     const generation = ++currentGeneration;
     const isCurrent = () => generation === currentGeneration;
+    pendingRecoveryVideoId = null;
 
     // 1. Teardown previous state — also settles any pending work still tied
     // to the previous generation (playerObserver.disconnect() now rejects
@@ -73,6 +107,21 @@
       if (youtubeUtils.isShorts() || youtubeUtils.isLive(video)) {
         return;
       }
+
+      // Phase 6 (6.1) — once this generation has a confirmed video element,
+      // watch for it being replaced later (YouTube swapping the element
+      // without a v= change) and re-run the full pipeline for the SAME
+      // videoId when that happens, so tracking/resume reattach to the new
+      // element instead of silently going stale against a detached one.
+      // Reuses the single shared MutationObserver (playerObserver.js) —
+      // never a second one. playerObserver.disconnect() at the top of the
+      // next onVideoChange() call (this generation's own teardown, or a
+      // newer one superseding it) clears this watch.
+      playerObserver.watchForReplacement((newVideo) => {
+        if (!isCurrent()) return;
+        debugLogger.log('bootstrap:playerElementReplaced', { videoId });
+        onVideoChange(videoId).catch(err => console.warn('[YTResume] Replacement recovery failed:', err.message));
+      });
 
       // F04/T4.4 — a reused element carrying over the exact same duration
       // it had when the PREVIOUS navigation started may still be showing
@@ -152,6 +201,14 @@
 
     } catch(err) {
       console.warn('[YTResume] Player initialization failed:', err.message);
+      // Phase 6 (6.1/6.2/F02/R11) — player discovery itself never even got
+      // an element (a timeout, or this generation being disconnected by a
+      // NEWER one — isCurrent() tells the two apart: a disconnect from a
+      // newer generation already flipped currentGeneration, so isCurrent()
+      // is false here for that case and this deliberately does nothing).
+      // A genuine timeout on the still-current generation stays eligible
+      // for a later recovery trigger instead of being abandoned outright.
+      if (isCurrent()) pendingRecoveryVideoId = videoId;
     }
   }
 
@@ -163,6 +220,16 @@
     // also drives progressTracker's 5s save cadence, so only one setInterval
     // is ever alive.
     navigationManager.start(onVideoChange, () => progressTracker.tick());
+
+    // Phase 6 (6.1/F02/R11) — page-lifecycle recovery triggers. Registered
+    // once, for the life of the content script, same as navigationManager's
+    // own listeners — attemptRecovery() itself is a no-op whenever nothing
+    // is actually pending, so these cost nothing on the (overwhelmingly
+    // common) path where a session never needed recovery.
+    document.addEventListener('visibilitychange', () => {
+      if (!document.hidden) attemptRecovery();
+    });
+    window.addEventListener('pageshow', () => attemptRecovery());
   }
 
   init();

@@ -17,9 +17,29 @@
 const progressTracker = (() => {
   // No setInterval of its own (D-059) — navigationManager already runs a
   // permanent 1000ms poll for the life of the content script; tick() rides
-  // on that instead of a second concurrent interval. ticksSinceSave counts
-  // to 5 to preserve the original 5000ms save cadence exactly.
+  // on that instead of a second concurrent interval.
+  // ticksSinceSave counts to 5 to preserve the original 5000ms save cadence
+  // under ordinary operation, where each tick genuinely represents ~1000ms
+  // of real elapsed time. Phase 6 (6.6) adds lastSaveCheckAt/SAVE_INTERVAL_MS
+  // as an ADDITIONAL, wall-clock-measured early trigger alongside it (see
+  // tick() below) — a suspended/throttled background tab can call tick()
+  // far less often than once per second, so waiting on the count alone
+  // would silently stretch the cadence to many multiples of 5s; measuring
+  // real elapsed time catches that case without changing behavior for the
+  // ordinary one (or for tests that drive tick() manually without
+  // advancing the clock in between — the count condition still fires
+  // exactly as before there).
   let ticksSinceSave = 0;
+  const SAVE_INTERVAL_MS = 5000;
+  let lastSaveCheckAt = 0;
+  // Phase 6 (6.5) — the most recent settled (not mid-seek), non-ad, valid
+  // sample observed for the CURRENT session, tied to activeVideoId. Kept
+  // fresh opportunistically (tick, and after seeked/pause/ended) so
+  // flushBeforeTeardown() below always has a genuinely good position to
+  // fall back on even if the video happens to be mid-seek at the exact
+  // moment teardown runs (R10/6.7 — a pending seek is never persisted as
+  // "completed").
+  let lastGoodSample = null;
   // committedTime: the position actually confirmed saved (a successful
   // write acknowledgement), never advanced optimistically before that
   // (Roadmap 3.5 — closes R24). Seeded from the starting position in
@@ -132,6 +152,14 @@ const progressTracker = (() => {
       debugLogger.log('attemptSave:skipped', { videoId: activeVideoId, trigger, reason: 'disarmed' });
       return { ok: false, reason: 'disarmed' }; // Roadmap 3.1 — no write until the resume lifecycle has resolved
     }
+    // Phase 6 (6.7) — a pending/in-flight seek is never persisted as a
+    // completed playback position, regardless of trigger: currentTime reads
+    // as numerically anything mid-seek, so a save landing exactly then would
+    // record a position that was never actually watched.
+    if (activeVideo.seeking) {
+      debugLogger.log('attemptSave:skipped', { videoId: activeVideoId, trigger, reason: 'seekInFlight' });
+      return { ok: false, reason: 'seekInFlight' };
+    }
     if (playerObserver.isAdPlaying()) {
       debugLogger.log('attemptSave:skipped', { videoId: activeVideoId, trigger, reason: 'adPlaying' });
       return { ok: false, reason: 'adPlaying' };
@@ -224,6 +252,24 @@ const progressTracker = (() => {
   }
 
   /**
+   * Phase 6 (6.5) — records the current position as `lastGoodSample`
+   * whenever it's genuinely trustworthy: not mid-seek, not an ad, and a
+   * valid (non-NaN, in-bounds) position. Cheap, called opportunistically
+   * from tick() and the seeked/pause/ended handlers — never from a save
+   * attempt itself, so it stays independent of the delta/backward-jump
+   * guards below (this is a raw "last known-good" cache, not a save log).
+   */
+  function captureGoodSampleIfClean() {
+    if (!activeVideo || !activeVideoId) return;
+    if (activeVideo.seeking) return;
+    if (playerObserver.isAdPlaying()) return;
+    const current = Math.floor(activeVideo.currentTime);
+    const duration = Math.floor(activeVideo.duration);
+    if (Number.isNaN(current) || current < 0 || Number.isNaN(duration) || current > duration) return;
+    lastGoodSample = { time: current, duration };
+  }
+
+  /**
    * Initializes interval-based and event-based progress tracking
    * for the given video element and videoId.
    *
@@ -246,6 +292,8 @@ const progressTracker = (() => {
     hasUserSeek = false;
     lastActiveAt = Date.now(); // Roadmap 3.2 — a fresh session starts "active"
     ticksSinceSave = 0;
+    lastSaveCheckAt = Date.now();
+    lastGoodSample = null;
     armed = false; // Roadmap 3.1 — disarmed on every load; bootstrap.js calls arm() once the resume lifecycle resolves
 
     // Event-based triggers — all save unconditionally (D-024)
@@ -278,8 +326,9 @@ const progressTracker = (() => {
       if (corroborated || result.reason !== 'backwardJumpRejected') {
         lastAttemptedTime = current;
       }
+      captureGoodSampleIfClean();
     };
-    handleEnded = () => { recordActivity(); attemptSave(true, 'ended'); };
+    handleEnded = () => { recordActivity(); attemptSave(true, 'ended'); captureGoodSampleIfClean(); };
     handleVisibility = () => {
       if (document.hidden) attemptSave(true, 'visibility');
     };
@@ -295,9 +344,14 @@ const progressTracker = (() => {
   }
 
   /**
-   * Advances the tick counter by one 1000ms beat (driven by
-   * navigationManager's poll interval, D-059) and fires attemptSave every
-   * 5th tick — a no-op when tracking isn't active.
+   * Advances the tick counter by one beat (driven by navigationManager's
+   * poll interval, D-059) — a no-op when tracking isn't active. Fires
+   * attemptSave on the 5th tick (the ordinary cadence), OR as soon as
+   * SAVE_INTERVAL_MS of real wall-clock time has elapsed since the last
+   * save check, whichever comes first (Phase 6/6.6) — the wall-clock arm
+   * only ever fires first when tick() itself has been called unusually
+   * infrequently relative to real time (a suspended/throttled background
+   * tab), which is exactly the case a pure tick count can't detect.
    */
   function tick() {
     if (!activeVideo || !activeVideoId) return;
@@ -305,9 +359,11 @@ const progressTracker = (() => {
     // a paused video ticking along in the background is not — that's
     // exactly the passive case F07 protects a fresher checkpoint from.
     if (!activeVideo.paused) recordActivity();
+    captureGoodSampleIfClean();
     ticksSinceSave += 1;
-    if (ticksSinceSave >= 5) {
+    if (ticksSinceSave >= 5 || (Date.now() - lastSaveCheckAt) >= SAVE_INTERVAL_MS) {
       ticksSinceSave = 0;
+      lastSaveCheckAt = Date.now();
       attemptSave(false, 'interval');
     }
   }
@@ -380,12 +436,45 @@ const progressTracker = (() => {
   }
 
   /**
+   * Phase 6 (6.5/R10) — flushes a last-known-good sample synchronously as
+   * the very first step of stop(), before any state is cleared or the
+   * caller moves on to (possibly) tearing down/replacing the video element.
+   * This is what "before navigation teardown, instead of reading a
+   * possibly-repurposed element afterward" means in practice: the flush
+   * happens here, now, using state this closure still owns, rather than
+   * some later async callback that might run after a new video has already
+   * taken this element's place.
+   *
+   * If the video is currently mid-seek (a pending seek at the exact moment
+   * of teardown), its live position is not trustworthy (6.7) — fall back to
+   * `lastGoodSample` instead of skipping the flush entirely.
+   */
+  function flushBeforeTeardown() {
+    if (!activeVideo || !activeVideoId || !armed) return;
+    if (!activeVideo.seeking) {
+      attemptSave(true, 'teardown-flush', true);
+      return;
+    }
+    if (lastGoodSample && timeUtils.meetsMinimumWatched(lastGoodSample.time, minWatchSeconds)) {
+      const title = youtubeUtils.getTitle();
+      const channel = youtubeUtils.getChannelName();
+      storageManager.saveProgress(activeVideoId, lastGoodSample.time, lastGoodSample.duration, title, channel, {
+        sessionId,
+        lastActiveAt,
+        explicitUserSeek: hasUserSeek,
+        trigger: 'teardown-flush-fallback',
+      }).catch(err => console.warn('[YTResume] Teardown flush failed:', err.message));
+    }
+  }
+
+  /**
    * Removes all event listeners and resets internal state. Idempotent —
    * safe to call multiple times or before start().
    */
   function stop() {
-    ticksSinceSave = 0;
+    flushBeforeTeardown();
     armed = false;
+    ticksSinceSave = 0;
 
     if (activeVideo) {
       if (handlePause) activeVideo.removeEventListener('pause', handlePause);
@@ -411,6 +500,8 @@ const progressTracker = (() => {
     sessionId = null;
     hasUserSeek = false;
     lastActiveAt = 0;
+    lastSaveCheckAt = 0;
+    lastGoodSample = null;
     minWatchSeconds = 30;
   }
 
