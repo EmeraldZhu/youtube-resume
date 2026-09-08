@@ -7,14 +7,15 @@
 
 ## Phase Status — v4.0.0
 
-Roadmap v4 drafted from `docs/EXTENSION_AUDIT_2026-09-07.md` (21 findings, F01–F21). Phases 0–1 have
-shipped code (harness, storage boundary validation/repair); Phases 2–9 are still planning only.
+Roadmap v4 drafted from `docs/EXTENSION_AUDIT_2026-09-07.md` (21 findings, F01–F21). Phases 0–2 have
+shipped code (harness, storage boundary validation/repair, serialized writer); Phases 3–9 are still
+planning only.
 
 | Phase | Name | Status | Blocked By |
 |---|---|---|---|
 | 0 | Reproduction & Harness Foundation | DONE | — |
 | 1 | Boundary Validation & Safe Repair | DONE | — |
-| 2 | Serialized Storage Writer | NOT STARTED | — |
+| 2 | Serialized Storage Writer | AWAITING VERIFICATION | — |
 | 3 | Write Ownership, Freshness & Durable Saves | NOT STARTED | — |
 | 4 | Resume Identity & Cancellation | NOT STARTED | — |
 | 5 | Verified Resume Outcomes | NOT STARTED | — |
@@ -25,9 +26,10 @@ shipped code (harness, storage boundary validation/repair); Phases 2–9 are sti
 
 Ship gates: A after Phase 3 (storage correctness), B after Phase 6 (resume reliability), C after
 Phase 8 (product completeness). Phases 0–3 are independently releasable (Roadmap v4 §3). Key
-decisions logged D-100–D-131 — see `docs/DECISIONS.md` for the full ledger; notable: service-worker
-storage writer (D-102), new additive `youtubeResumeQuarantine` root key (D-127), committed `tests/`
-regression harness (D-108). UX Spec 4.0.0 copy IDs CP-68–CP-79 assigned (D-110); CP-80 is next free.
+decisions logged D-100–D-137 — see `docs/DECISIONS.md` for the full ledger; notable: service-worker
+storage writer (D-102, built Phase 2 — D-132–D-136), new additive `youtubeResumeQuarantine` root key
+(D-127), committed `tests/` regression harness (D-108). UX Spec 4.0.0 copy IDs CP-68–CP-79 assigned
+(D-110); CP-80 is next free.
 
 ## Prior releases (shipped, owner-confirmed DONE)
 
@@ -43,11 +45,13 @@ A phase is `DONE` only when the owner confirms it. Claude Code never writes `DON
 
 ## Next action
 
-Phase 1 DONE (owner-confirmed — no owner-facing visual check existed for this phase; storage/repair
-logic + one popup DOM state, self-verified via `node tests/run.js`: R15/16/17/18/20 flip reproduces →
-fixed, all else unchanged, 3 new Phase-1 cases pass). Decisions D-112, D-127–D-131. Begin Phase 2
-(Serialized Storage Writer) next via `docs/PHASE_PROMPTS_v4.md` after `/clear`. Nothing blocking — see
-`docs/DECISIONS.md` "Currently blocking" for the one open, non-blocking item (D-034).
+Phase 2 AWAITING VERIFICATION: new `background/storageWriter.js` (MV3 service worker, sole
+`chrome.storage.local` writer) and `storage/storageValidation.js` (shared validation/repair logic);
+`storageManager.js`'s public API unchanged. Self-verified via `node tests/run.js`: R13/R14/R19 flip
+to fixed, 4 new Phase-2 cases pass, 31/31 clean. Decisions D-132–D-137. No DOM changed, so no
+owner-facing visual check — owner confirmation moves it to DONE whenever convenient. Begin Phase 3
+(Write Ownership, Freshness & Durable Saves) next via `docs/PHASE_PROMPTS_v4.md` after `/clear`.
+Nothing blocking — see `docs/DECISIONS.md` "Currently blocking" for the one open item (D-034).
 
 ## Doc versions
 

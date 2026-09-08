@@ -115,7 +115,12 @@ youtube-resume/
 │                                 # serialized, restart-safe MV3 service worker; no other logic
 │
 ├── storage/
-│   └── storageManager.js       # chrome.storage.local abstraction
+│   ├── storageValidation.js    # v4 (Phase 2, D-102) — pure schema/validation/repair logic shared by
+│   │                             # storageManager.js and background/storageWriter.js (no chrome.storage
+│   │                             # access; kept under storage/, not utils/, to avoid reordering the
+│   │                             # manifest's "storage -> utils -> content" load sequence)
+│   └── storageManager.js       # chrome.storage.local abstraction: reads direct, mutations sent to
+│                                 # background/storageWriter.js as commands (v4 Phase 2, D-102)
 │
 ├── utils/
 │   ├── debugLogger.js          # DEBUG-gated tracing (Phase 1+, §7.1); no-op unless DEBUG = true
@@ -833,13 +838,31 @@ function stop() {
 logic — the ONLY module that may touch `chrome.storage.local` (enforced for both the content script and
 the popup, which loads this module too as of Phase 4).
 
-**v4.0.0 forward reference (Phase 2/3, D-102):** `storageManager`'s write path becomes a client of
-the new `background/storageWriter.js` service worker — every mutation this module currently applies
-directly to `chrome.storage.local` will instead be sent as a command to the worker, which is the
-sole write path from that phase on. Reads are unaffected and stay direct. This module's public API
-(below) is unchanged by that move. The mechanism itself is out of scope here and lands in this
-section per-phase as Roadmap v4 Phase 2/3 is implemented, per the standing v3 convention of updating
-the TDD after a phase lands rather than ahead of it (D-030).
+**v4.0.0 (Phase 2, D-102):** every mutating function below (`saveProgress`, `deleteProgress`,
+`pinProgress`, `unpinProgress`, `clearAllProgress`, `saveSettings`, `resetSettings`) is now a thin
+message client — it sends a command to `background/storageWriter.js` over a `chrome.runtime` port
+and resolves/rejects from the worker's response. This module no longer calls
+`chrome.storage.local.set`/`.remove` anywhere. Reads (`getProgress`, `getAllProgress`, `getSettings`,
+`getDefaultSettings`) are unaffected — still direct, no round trip. The public API and every
+function's signature/Promise contract below is unchanged; no caller needed a code change.
+
+Pure validation/repair logic (constants, `sanitizeEntry`, `sanitizeSettingsValue`, `resolveVideoId`,
+`mergeEntryPair`, `enforceUnpinnedCap`, `repairStore`, the migration step list) moved out of this
+module into `storage/storageValidation.js`, a dependency-free module both this file and
+`storageWriter.js` load. `storageManager.js` still calls it for read-side sanitization;
+`storageWriter.js` calls it for write-side validation/repair — one shared implementation, not two.
+
+**Messaging client:** a single long-lived `chrome.runtime.connect({ name: 'storageWriter' })` port,
+created lazily (and re-created whenever missing) by `getPort()`. Requests carry an incrementing `id`
+so out-of-order responses correlate correctly. `sendCommand(command, payload)` retries only a
+*transient* failure — the port disconnecting, or a `postMessage` throwing because it was already
+dead — with a bounded backoff schedule `[100, 300, 900]` ms (three attempts, Tier 2 value pick); an
+*application-level* rejection (the worker responded, just refusing the request — e.g. pin cap
+reached) is never retried, since retrying can't change that outcome. Every command is idempotent
+(§4.6a), so resending one after an unknown outcome is always safe. `storageManager.js` also calls
+`getPort()` once on load — connecting alone is enough to wake a dormant MV3 worker in real Chrome —
+so the worker's one-time startup (migrate + repair, now running exclusively there) isn't deferred
+until the first real mutation.
 
 #### Public API
 
@@ -1329,6 +1352,56 @@ a corrupted value (e.g. `youtubeResumeSettings` manually overwritten with a stri
 an undefined setting — the merge falls back to `{}` when the stored value isn't a plain object.
 `saveSettings(partial)` reads-merges-writes, so callers only pass the keys that changed.
 `resetSettings()` writes `DEFAULT_SETTINGS` verbatim and never touches `youtubeResume` (D-014).
+
+**Pseudocode note (v4 Phase 2):** the mutating-function bodies shown above (`saveProgress`,
+`deleteProgress`, `pinProgress`, `unpinProgress`, `clearAllProgress`, `saveSettings`,
+`resetSettings`) describe the read-modify-write *logic* each command applies — that logic itself is
+unchanged and is exactly what `background/storageWriter.js` now executes (§4.6a) on receiving the
+matching command. What moved is only *where* it runs: `storageManager.js`'s own copies of these
+bodies are gone, replaced by a `sendCommand(...)` call each (see the messaging-client note above).
+
+### 4.6a `background/storageWriter.js` (v4 Phase 2, D-102)
+
+**Purpose:** MV3 service worker; the sole writer for every `chrome.storage.local` mutation. Holds no
+resume/tracking/UI logic and makes zero network requests. Classic (non-`"module"`) worker, so it can
+`importScripts('../storage/storageValidation.js')` to reuse the same validation/repair logic
+`storageManager.js` uses for reads.
+
+**Command protocol:** one message type per mutation — `SAVE_PROGRESS`, `DELETE_PROGRESS`, `PIN`,
+`UNPIN`, `CLEAR_ALL`, `SET_SETTINGS`, `RESET_SETTINGS`, `REPAIR`, `MIGRATE` — each carrying the full
+parameters needed to apply it from scratch (no delta/increment commands). A message is
+`{ id, command, payload }`; a response is `{ id, ok: true, result }` or `{ id, ok: false, error }`.
+`RESET_SETTINGS` is a Tier 2 addition beyond the roadmap's illustrative eight — `resetSettings()`
+already existed as a distinct public mutation (v2.0.0 Phase 6) and needed its own full-replace
+command rather than overloading `SET_SETTINGS` with a reset flag.
+
+**Serialization (2.3):** a single promise-chain queue (`queueTail`) — each incoming command is
+appended via `queueTail.then(task, task)`, so commands always execute one at a time, each seeing the
+prior command's already-applied storage state. This ordering, not the queue's persistence, is what
+fixes F06 (R13/R14/R19): two commands never interleave their own read-modify-write of the shared
+store.
+
+**Startup (2.5):** `let queueTail = runStartup()` — `runStartup()` runs `migrate()` then
+`repairDuplicates()` (Phase 1 logic, moved here verbatim) as the queue's first link, so every real
+command implicitly waits for it without the client needing a readiness handshake. This runs once per
+*worker* lifetime (an MV3 worker can restart many times as the browser idles it out — each restart
+reruns startup, which is safe because migrate/repair are idempotent), never once per tab/popup the
+way the pre-Phase-2 code did.
+
+**Restart-safety (hard requirement):** the browser can terminate an idle worker at any moment,
+including mid-queue. Nothing here is a durability boundary — the queue is pure in-memory ordering,
+not a persisted log. Every command is fully described by its own parameters plus whatever chrome.storage.local
+already holds, so a fresh worker instance starting a fresh, empty queue loses nothing: anything
+"in flight" was either already fully applied (durably, in storage) or never sent. The *client*
+(`storageManager.js`) is what retries a command whose outcome is unknown because its port dropped
+before a response arrived — safe only because every command here is idempotent.
+
+**Error surface:** a command handler that throws (e.g. `saveProgress` given an unresolved videoId,
+or `pinProgress` at the 20-pin cap) responds `{ ok: false, error: err.message }` — the exact same
+error text the pre-Phase-2 code threw synchronously, so nothing downstream needed to change how it
+reads a rejection's message. A response `postMessage` failing (the port died between finishing the
+command and replying) is swallowed — the client's own `onDisconnect` handling covers that case by
+retrying the command from scratch.
 `getDefaultSettings()` covers the remaining failure mode `getSettings()` can't self-heal: the
 `chrome.storage.local.get()` call itself rejecting (not just returning a corrupt value) — see
 §4.1's bootstrap fallback.

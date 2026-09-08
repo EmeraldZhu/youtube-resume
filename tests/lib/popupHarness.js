@@ -22,11 +22,14 @@ const vm = require('vm');
 const { createClock } = require('./fakeClock');
 const { createDocument, createWindow } = require('./fakeDom');
 const { createMockChromeStorage } = require('./mockChromeStorage');
+const { createFakeRuntime } = require('./fakeRuntime');
 
 const ROOT = path.join(__dirname, '..', '..');
 
 const MODULE_FILES = [
+  'storage/storageValidation.js',
   'storage/storageManager.js',
+  'background/storageWriter.js',
   'utils/debugLogger.js',
 ];
 const POPUP_FILE = 'popup/popup.js';
@@ -104,6 +107,7 @@ function loadPopup(opts = {}) {
   const window = createWindow(document, 'chrome-extension://fake-id/popup/popup.html');
   const chromeStorage = createMockChromeStorage(clock, opts.storageLatency || {});
   if (opts.seedStorage) chromeStorage._seed(opts.seedStorage);
+  const fakeRuntime = createFakeRuntime(clock);
 
   const warnings = [];
   const fakeConsole = {
@@ -114,7 +118,8 @@ function loadPopup(opts = {}) {
 
   const sandbox = {
     console: fakeConsole,
-    chrome: { storage: { local: chromeStorage.local } },
+    chrome: { storage: { local: chromeStorage.local }, runtime: fakeRuntime.runtime },
+    importScripts: () => {},
     document,
     window,
     setTimeout: clock.setTimeout,

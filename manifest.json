@@ -5,6 +5,9 @@
   "description": "Automatically resume YouTube videos exactly where you left off.",
   "permissions": ["storage"],
   "host_permissions": ["https://www.youtube.com/*"],
+  "background": {
+    "service_worker": "background/storageWriter.js"
+  },
   "action": {
     "default_popup": "popup/popup.html"
   },
@@ -12,6 +15,7 @@
     {
       "matches": ["https://www.youtube.com/*"],
       "js": [
+        "storage/storageValidation.js",
         "storage/storageManager.js",
         "utils/debugLogger.js",
         "utils/youtubeUtils.js",

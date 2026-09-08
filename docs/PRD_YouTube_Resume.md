@@ -575,6 +575,8 @@ youtube-resume/
 │   └── uiInjector.js           # Restart button + resume toast
 │
 ├── storage/
+│   ├── storageValidation.js    # Pure schema/validation/repair logic shared by storageManager.js
+│   │                             # and storageWriter.js; no chrome.storage access of its own
 │   └── storageManager.js       # chrome.storage.local abstraction, settings, migration
 │
 ├── utils/
@@ -633,6 +635,7 @@ youtube-resume/
     {
       "matches": ["https://www.youtube.com/*"],
       "js": [
+        "storage/storageValidation.js",
         "storage/storageManager.js",
         "utils/debugLogger.js",
         "utils/youtubeUtils.js",

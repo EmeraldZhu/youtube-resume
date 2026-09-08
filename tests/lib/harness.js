@@ -23,15 +23,28 @@ const vm = require('vm');
 const { createClock } = require('./fakeClock');
 const { createDocument, createWindow, FakeMutationObserver } = require('./fakeDom');
 const { createMockChromeStorage } = require('./mockChromeStorage');
+const { createFakeRuntime } = require('./fakeRuntime');
 
 const ROOT = path.join(__dirname, '..', '..');
+
+const STORAGE_WRITER_FILE = 'background/storageWriter.js';
 
 // Manifest content_scripts order (manifest.json) — significant, per
 // CLAUDE.md ("Load order in manifest.json is significant: storage -> utils
 // -> content"). popup.js is intentionally excluded: no R1-R24 case touches
-// the popup layer.
+// the popup layer. storage/storageWriter.js (the background service worker)
+// is loaded into this same vm context too (v4 Phase 2) — the harness models
+// content-script and worker as sharing one process, which is close enough
+// for what these cases test (command serialization, idempotent retry) even
+// though real Chrome runs them in separate realms connected only by
+// chrome.runtime; storageManager.js/storageWriter.js talk to each other
+// exclusively through the fake chrome.runtime port below, never by reaching
+// into each other's closures, so this simplification doesn't let a case
+// pass by accident via shared state that wouldn't exist in real Chrome.
 const MODULE_FILES = [
+  'storage/storageValidation.js',
   'storage/storageManager.js',
+  STORAGE_WRITER_FILE,
   'utils/debugLogger.js',
   'utils/youtubeUtils.js',
   'utils/timeUtils.js',
@@ -45,6 +58,7 @@ const MODULE_FILES = [
 const BOOTSTRAP_FILE = 'content/bootstrap.js';
 
 const MODULE_GLOBAL_NAMES = [
+  'storageValidation',
   'storageManager',
   'debugLogger',
   'youtubeUtils',
@@ -71,6 +85,7 @@ function loadExtension(opts = {}) {
   const window = createWindow(document, opts.href || 'https://www.youtube.com/');
   const chromeStorage = createMockChromeStorage(clock, opts.storageLatency || {});
   if (opts.seedStorage) chromeStorage._seed(opts.seedStorage);
+  const fakeRuntime = createFakeRuntime(clock);
 
   const warnings = [];
   const logs = [];
@@ -82,7 +97,13 @@ function loadExtension(opts = {}) {
 
   const sandbox = {
     console: fakeConsole,
-    chrome: { storage: { local: chromeStorage.local } },
+    chrome: { storage: { local: chromeStorage.local }, runtime: fakeRuntime.runtime },
+    // storageWriter.js importScripts()'s storageValidation.js, which the
+    // harness already loads directly into this same context (see
+    // MODULE_FILES) — a no-op here is faithful enough for what these cases
+    // exercise (real Chrome's classic-worker importScripts is not itself
+    // under test).
+    importScripts: () => {},
     document,
     window,
     MutationObserver: FakeMutationObserver,
@@ -109,12 +130,31 @@ function loadExtension(opts = {}) {
     .join('\n');
   new vm.Script(exportCode, { filename: '(export-globals)' }).runInContext(context);
 
+  /**
+   * Simulates the service worker being terminated and, after some virtual
+   * time, respawning (v4 Phase 2, T2.5): drops every live port (so
+   * storageManager's onDisconnect/retry path fires, same as a real port
+   * dropping) and re-runs storageWriter.js in this same context, exactly
+   * like the browser spinning up a fresh worker instance — a fresh queue,
+   * startup (migrate + repair) run again (idempotent), no onConnect
+   * listener until the new script registers one.
+   */
+  function restartWorker() {
+    fakeRuntime._terminateWorker();
+    fakeRuntime._reviveWorker();
+    const code = fs.readFileSync(path.join(ROOT, STORAGE_WRITER_FILE), 'utf8');
+    new vm.Script(code, { filename: STORAGE_WRITER_FILE }).runInContext(context);
+  }
+
   return {
     context,
     clock,
     document,
     window,
     chromeStorage,
+    fakeRuntime,
+    terminateWorker: () => fakeRuntime._terminateWorker(),
+    restartWorker,
     warnings,
     logs,
     // Convenience accessors, populated after exportCode ran above.
