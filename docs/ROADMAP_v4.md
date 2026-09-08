@@ -452,7 +452,8 @@ seeks, arming, and UI as well.
   dedicated case (D-152)
 - [x] Harness cases R5, R12, R21, R22 flip from "reproduces" to "not-reproduced" — full suite
   (`node tests/run.js`) shows zero regressions elsewhere. Live `chrome-devtools-mcp` verification
-  blocked by a locked Chrome profile this session (D-153, OPEN) — needs the owner's machine.
+  completed (D-153): a real pre-roll ad never disqualified eligibility; an ad-free video resumed
+  end-to-end with a verified seek; rapid A→B→C navigation produced zero wrong-ID or stale saves.
 
 ### Docs to Update
 

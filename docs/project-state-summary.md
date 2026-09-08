@@ -52,10 +52,11 @@ one's tracker). `playerObserver.disconnect()` now settles a pending `waitForVide
 `resumeManager` resolves real, post-ad content metadata before evaluating eligibility, so a short ad's
 duration can't disqualify a long saved position (R5), with mid-ad revalidation and a reused-element
 metadata-freshness check (D-146–D-151). Self-verified via `node tests/run.js`: R5/R12/R21/R22 all flip
-to `not-reproduced`; 4 new cases (T4.1/T4.2/T4.4/T4.7, D-152) pass; zero regressions. Live
-`chrome-devtools-mcp` verification was blocked by a locked Chrome profile this session (D-153, OPEN) —
-needs the owner's machine. Decisions D-146–D-153. Nothing else blocking (see DECISIONS.md "Currently
-blocking", D-034, non-blocking).
+to `not-reproduced`; 4 new cases (T4.1/T4.2/T4.4/T4.7, D-152) pass; zero regressions. Live verified via
+`chrome-devtools-mcp` (D-153, DONE): a real 2-ad pre-roll never disqualified eligibility and abandoned
+cleanly at the 60s ceiling; an ad-free video resumed end-to-end with a verified seek; rapid A→B→C
+navigation produced zero wrong-ID or stale saves. Decisions D-146–D-153. Nothing else blocking (see
+DECISIONS.md "Currently blocking", D-034, non-blocking).
 
 ## Doc versions
 
