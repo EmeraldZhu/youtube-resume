@@ -13,7 +13,7 @@ shipped code (harness, storage boundary validation/repair); Phases 2–9 are sti
 | Phase | Name | Status | Blocked By |
 |---|---|---|---|
 | 0 | Reproduction & Harness Foundation | DONE | — |
-| 1 | Boundary Validation & Safe Repair | AWAITING VERIFICATION | — |
+| 1 | Boundary Validation & Safe Repair | DONE | — |
 | 2 | Serialized Storage Writer | NOT STARTED | — |
 | 3 | Write Ownership, Freshness & Durable Saves | NOT STARTED | — |
 | 4 | Resume Identity & Cancellation | NOT STARTED | — |
@@ -43,11 +43,11 @@ A phase is `DONE` only when the owner confirms it. Claude Code never writes `DON
 
 ## Next action
 
-Phase 1 self-verified this session — awaiting owner confirmation (no owner-facing visual check exists
-for this phase; storage/repair logic + one popup DOM state, verified via `node tests/run.js`: R15/16/
-17/18/20 flip reproduces → fixed, all else unchanged, 3 new Phase-1 cases pass). Decisions D-127–D-131.
-Begin Phase 2 (Serialized Storage Writer) next via `docs/PHASE_PROMPTS_v4.md` after `/clear`. Nothing
-blocking — see `docs/DECISIONS.md` "Currently blocking" for the one open, non-blocking item (D-034).
+Phase 1 DONE (owner-confirmed — no owner-facing visual check existed for this phase; storage/repair
+logic + one popup DOM state, self-verified via `node tests/run.js`: R15/16/17/18/20 flip reproduces →
+fixed, all else unchanged, 3 new Phase-1 cases pass). Decisions D-112, D-127–D-131. Begin Phase 2
+(Serialized Storage Writer) next via `docs/PHASE_PROMPTS_v4.md` after `/clear`. Nothing blocking — see
+`docs/DECISIONS.md` "Currently blocking" for the one open, non-blocking item (D-034).
 
 ## Doc versions
 
