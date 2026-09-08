@@ -18,7 +18,7 @@ Phases 4–9 are still planning only.
 | 2 | Serialized Storage Writer | DONE | — |
 | 3 | Write Ownership, Freshness & Durable Saves | DONE | — |
 | 4 | Resume Identity & Cancellation | AWAITING VERIFICATION | — |
-| 5 | Verified Resume Outcomes | AWAITING VERIFICATION | — |
+| 5 | Verified Resume Outcomes | DONE | — |
 | 6 | Deferred Recovery Lifecycle | NOT STARTED | — |
 | 7 | Completion Policy & Remove Completed | NOT STARTED | — |
 | 8 | Popup Reconciliation & Accessibility | NOT STARTED | — |
