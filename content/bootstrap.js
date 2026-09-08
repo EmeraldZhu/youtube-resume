@@ -89,13 +89,50 @@
       // never be mistaken for a trackable position.
       progressTracker.start(video, videoId, settings);
 
+      // D-107/F20/Phase 5 task 5.10 — an explicit, valid t= timestamp wins
+      // outright for this navigation: automatic saved-position resume is
+      // cancelled, and playback is tracked as a normal user-directed
+      // session from the start. YouTube's own player performs the actual
+      // timestamp seek; this extension's only job is to not fight it with
+      // a competing saved-position seek, and to not withhold tracking.
+      const timestampSeconds = youtubeUtils.getTimestampSeconds();
+      if (timestampSeconds !== null) {
+        debugLogger.log('bootstrap:timestampPrecedence', { videoId, timestampSeconds });
+        if (isCurrent()) {
+          progressTracker.markUserDirected();
+          progressTracker.arm();
+        }
+        return;
+      }
+
       // 5. Try Resume
       try {
         const saved = await storageManager.getProgress(videoId);
         if (!isCurrent()) return; // superseded while the storage read was in flight
 
         if (saved) {
-          await resumeManager.tryResume(video, saved, videoId, settings, isCurrent, forceMetadataRefresh);
+          const result = await resumeManager.tryResume(video, saved, videoId, settings, isCurrent, forceMetadataRefresh);
+          if (!isCurrent()) return;
+
+          // Phase 5 (task 5.7/F05/R7) — a resume that did not reach a
+          // verified success, and did not otherwise establish this as a
+          // normal user-directed session (a genuine user seek cancelled
+          // it, or the user overrode it during verification), leaves the
+          // saved checkpoint at risk: ordinary playback from wherever the
+          // video actually started would otherwise look like unremarkable
+          // forward progress and silently overwrite it on the first
+          // interval save. Protect it instead of arming blind.
+          const userDirected = result.status === resumeManager.OUTCOME.USER_OVERRIDDEN ||
+            (result.status === resumeManager.OUTCOME.CANCELLED && result.reason === 'user-seek');
+          const established = result.status === resumeManager.OUTCOME.VERIFIED || userDirected;
+          if (userDirected) {
+            // Explicit, not left to the native 'seeked' event alone — the
+            // freshness check (Phase 3) needs to know this session is
+            // authoritative even if that event's own handler hasn't run yet.
+            progressTracker.markUserDirected();
+          } else if (!established) {
+            progressTracker.protectCheckpoint(saved.time);
+          }
         }
       } catch(err) {
         // Log but do not crash — resume failure shouldn't kill tracking
@@ -105,6 +142,11 @@
         // lifecycle has resolved (success or verified give-up), and only if
         // this generation is still the current one. A's completion must
         // never arm B's tracker while B's own resume is still pending.
+        // Phase 5 task 5.7 — arming itself stays unconditional here
+        // (tracking must keep working even after a failed resume, per
+        // CLAUDE.md's graceful-degradation rule); what changed is that a
+        // non-established outcome now protects the checkpoint first (above)
+        // instead of arming blind into an unconditional overwrite risk.
         if (isCurrent()) progressTracker.arm();
       }
 

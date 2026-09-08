@@ -5,7 +5,18 @@
  * and execute the seek. Coordinates with uiInjector.
  *
  * Public API:
- *   resumeManager.tryResume(video, saved, videoId, settings) → Promise<void>
+ *   resumeManager.tryResume(video, saved, videoId, settings) → Promise<Outcome>
+ *   resumeManager.OUTCOME → { VERIFIED, PENDING, DEFERRED, CANCELLED,
+ *                             USER_OVERRIDDEN, INELIGIBLE, FAILED }
+ *
+ * Outcome shape (Roadmap v4 Phase 5, task 5.6): every seek attempt produces
+ * exactly one of these instead of a bare boolean/void —
+ *   { status, reason, target, observed, attemptId }
+ * status is one of OUTCOME's values; reason is a short machine-readable
+ * string explaining it; target is the position resume was attempting to
+ * reach (saved.time), observed is the video's position when the outcome was
+ * decided, attemptId identifies this specific tryResume() call for
+ * diagnostics (debugLogger only — never surfaced to the user).
  */
 
 const resumeManager = (() => {
@@ -13,11 +24,44 @@ const resumeManager = (() => {
   const AD_WAIT_CEILING_MS = 60000; // D-020
   const AD_POLL_MS = 250;
   const AD_ROUND_MAX_ATTEMPTS = 3; // Tier 2 pick — bounds the ad-reappears-mid-delay loop
-  const DRIFT_TOLERANCE_S = 10; // D-021
+  const DRIFT_TOLERANCE_S = 10; // D-021 — also the settled-position tolerance (Phase 5)
   const SEEK_VERIFY_DELAY_MS = 250; // D-022
   const SEEK_TOLERANCE_S = 3; // D-022
   const SEEK_MAX_ATTEMPTS = 3; // D-022
   const NATIVE_OVERRIDE_CHECK_DELAY_MS = 500; // Tier 2 pick — Roadmap 3.4
+  // Phase 5 (D-155) — bounded post-verification monitoring window (R2): a
+  // few more checks beyond the existing 500ms one, not an unbounded fight
+  // with YouTube's own restore cue.
+  const MONITOR_ROUNDS = 4;
+  const MONITOR_INTERVAL_MS = 500;
+  // Phase 5 (D-156) — how recent a keydown/pointerdown/mousedown must be to
+  // treat a position change as genuine user intent rather than native
+  // interference (F08/task 5.4).
+  const USER_INPUT_WINDOW_MS = 800;
+  // HTMLMediaElement.HAVE_CURRENT_DATA — the minimum readiness a settled
+  // seek must show; below this the frame the position claims to be on
+  // hasn't actually loaded yet (R1).
+  const HAVE_CURRENT_DATA = 2;
+
+  const OUTCOME = {
+    VERIFIED: 'verified',
+    PENDING: 'pending',
+    DEFERRED: 'deferred',
+    CANCELLED: 'cancelled',
+    USER_OVERRIDDEN: 'user-overridden',
+    INELIGIBLE: 'ineligible',
+    FAILED: 'failed',
+  };
+
+  let attemptCounter = 0;
+  function nextAttemptId() {
+    attemptCounter += 1;
+    return `attempt-${Date.now()}-${attemptCounter}`;
+  }
+
+  function outcome(status, reason, target, observed, attemptId) {
+    return { status, reason, target, observed, attemptId };
+  }
 
   /**
    * Returns a Promise that resolves when video.duration is a
@@ -168,49 +212,136 @@ const resumeManager = (() => {
   }
 
   /**
-   * Assigns video.currentTime = resumeTime, then re-reads after
-   * SEEK_VERIFY_DELAY_MS. Re-assigns if off by more than SEEK_TOLERANCE_S,
-   * up to SEEK_MAX_ATTEMPTS (D-022). Never an unbounded retry loop.
+   * Whether video's current position/readiness counts as "settled" on
+   * resumeTime — genuinely landed, not merely sampled once mid-seek (R1).
+   * A pending seek (`seeking === true`) or a frame that hasn't actually
+   * loaded (`readyState < HAVE_CURRENT_DATA`) is never settled regardless
+   * of how close currentTime numerically reads.
    */
-  async function seekWithVerification(video, resumeTime) {
+  function isPositionSettled(video, target) {
+    if (video.seeking) return false;
+    if (typeof video.readyState === 'number' && video.readyState < HAVE_CURRENT_DATA) return false;
+    return Math.abs(video.currentTime - target) <= SEEK_TOLERANCE_S;
+  }
+
+  /**
+   * Assigns video.currentTime = resumeTime, then re-checks readiness and
+   * position stability after SEEK_VERIFY_DELAY_MS (R1 — checking `seeking`/
+   * `readyState`, not just numeric proximity, since a pending seek can read
+   * as numerically close while never having actually landed). Re-assigns if
+   * not settled, up to SEEK_MAX_ATTEMPTS (D-022). Never an unbounded retry
+   * loop.
+   *
+   * @returns {Promise<{ok: boolean, reason?: string}>}
+   */
+  async function seekWithVerification(video, resumeTime, isCurrent) {
     for (let attempt = 1; attempt <= SEEK_MAX_ATTEMPTS; attempt++) {
       try {
         video.currentTime = resumeTime;
       } catch (err) {
         console.warn('[YTResume] Seek failed:', err.message);
         debugLogger.log('tryResume:seekFailed', { attempt, error: err.message });
-        return false;
+        return { ok: false, reason: 'seek-threw' };
       }
 
       await delay(SEEK_VERIFY_DELAY_MS);
-      const drift = Math.abs(video.currentTime - resumeTime);
-      debugLogger.log('tryResume:seekVerify', { attempt, currentTime: video.currentTime, drift });
-      if (drift <= SEEK_TOLERANCE_S) {
-        return true;
-      }
+      if (!isCurrent()) return { ok: false, reason: 'cancelled' };
+
+      const settled = isPositionSettled(video, resumeTime);
+      debugLogger.log('tryResume:seekVerify', {
+        attempt,
+        currentTime: video.currentTime,
+        seeking: video.seeking,
+        readyState: video.readyState,
+        settled,
+      });
+      if (settled) return { ok: true };
     }
-    return false;
+    return { ok: false, reason: 'seek-not-settled' };
   }
 
   /**
-   * After a verified seek, waits briefly and checks whether YouTube's own
-   * native "continue watching" restore moved currentTime again. If so,
-   * re-asserts the resume position exactly once. A second override is
-   * accepted silently — no further check, no unbounded loop (Roadmap 3.4).
+   * The existing 500ms post-seek check (Roadmap 3.4), now producing a typed
+   * result instead of swallowing a thrown corrective re-seek (R3): a drift
+   * that turns out to correlate with recent user input is accepted as a
+   * deliberate override, not corrected over (task 5.4); otherwise it's
+   * treated as native interference and re-asserted once. A throw here is a
+   * real failure, never masked by success UI.
+   *
+   * @returns {Promise<{ok: boolean, reason?: string, userOverride?: boolean}>}
    */
-  async function reassertIfNativeOverride(video, resumeTime) {
+  async function verifyAndReassert(video, resumeTime, isCurrent) {
     await delay(NATIVE_OVERRIDE_CHECK_DELAY_MS);
-    const drift = Math.abs(video.currentTime - resumeTime);
-    debugLogger.log('tryResume:nativeOverrideCheck', { currentTime: video.currentTime, resumeTime, drift });
-    if (drift <= SEEK_TOLERANCE_S) return; // no override observed
+    if (!isCurrent()) return { ok: false, reason: 'cancelled' };
+
+    if (isPositionSettled(video, resumeTime)) return { ok: true };
+
+    if (userIntent.wasRecentInput(USER_INPUT_WINDOW_MS)) {
+      debugLogger.log('tryResume:userOverrideAtReassert', { currentTime: video.currentTime });
+      return { ok: true, userOverride: true };
+    }
 
     try {
       video.currentTime = resumeTime;
       debugLogger.log('tryResume:nativeOverrideReasserted', { resumeTime });
+      return { ok: true };
     } catch (err) {
       console.warn('[YTResume] Re-assert seek failed:', err.message);
       debugLogger.log('tryResume:nativeOverrideReassertFailed', { error: err.message });
+      return { ok: false, reason: 'reassert-threw' };
     }
+  }
+
+  /**
+   * Phase 5 (R2/task 5.1) — bounded background monitoring beyond the single
+   * 500ms reassert check: YouTube's own restore cue can override a verified
+   * seek several seconds later, with nothing watching for it. Fire-and-
+   * forget (not part of tryResume's awaited chain — bootstrap.js must not
+   * wait on this to arm tracking), bounded to MONITOR_ROUNDS checks so this
+   * never fights YouTube indefinitely, and stands down the moment genuine
+   * user input is observed (task 5.4).
+   */
+  function monitorForLateOverride(video, resumeTime, isCurrent) {
+    let round = 0;
+    function tick() {
+      round += 1;
+      if (!isCurrent() || round > MONITOR_ROUNDS) return;
+      if (userIntent.wasRecentInput(USER_INPUT_WINDOW_MS)) {
+        debugLogger.log('tryResume:monitorStoodDown', { round, reason: 'userInput' });
+        return;
+      }
+      if (!isPositionSettled(video, resumeTime) && !video.seeking) {
+        try {
+          video.currentTime = resumeTime;
+          debugLogger.log('tryResume:lateOverrideCorrected', { round, resumeTime });
+        } catch (err) {
+          debugLogger.log('tryResume:lateOverrideCorrectFailed', { round, error: err.message });
+          return; // give up silently — bounded, no fighting indefinitely
+        }
+      }
+      setTimeout(tick, MONITOR_INTERVAL_MS);
+    }
+    setTimeout(tick, MONITOR_INTERVAL_MS);
+  }
+
+  /**
+   * Phase 5 (task 5.3/5.4, F08) — checks whether video's position drifted
+   * away from the expected pre-delay trajectory (accounting for elapsed
+   * time and playback rate; paused media isn't expected to move at all).
+   * A drift that correlates with recent keyboard/pointer/accessible-control
+   * input is genuine user intent — direction and magnitude alone no longer
+   * decide this, closing the gap where small forward jumps and all
+   * backward jumps previously went unchecked (F08).
+   *
+   * @returns {{jumped: boolean, userSeek: boolean}}
+   */
+  function checkStabilization(video, preDelayTime, elapsedMs) {
+    const expected = video.paused
+      ? preDelayTime
+      : preDelayTime + (elapsedMs / 1000) * (video.playbackRate || 1);
+    const jumped = Math.abs(video.currentTime - expected) > DRIFT_TOLERANCE_S;
+    const userSeek = jumped && userIntent.wasRecentInput(USER_INPUT_WINDOW_MS);
+    return { jumped, userSeek };
   }
 
   /**
@@ -229,8 +360,10 @@ const resumeManager = (() => {
    *   Defaults to always-current for direct/test callers that omit it.
    * @param {boolean} [forceMetadataRefresh] - F04/T4.4: see
    *   establishContentMetadata's forceRefresh param.
+   * @returns {Promise<{status, reason, target, observed, attemptId}>}
    */
   async function tryResume(video, saved, videoId, settings = {}, isCurrent = () => true, forceMetadataRefresh = false) {
+    const attemptId = nextAttemptId();
     const minWatchSeconds = settings.minWatchSeconds ?? 30;
     const completionThreshold = settings.completionThreshold ?? 0.95;
     const rewindSeconds = settings.rewindSeconds ?? 2;
@@ -238,6 +371,7 @@ const resumeManager = (() => {
     const showRestartButton = settings.showRestartButton ?? true;
 
     debugLogger.log('tryResume:entry', {
+      attemptId,
       videoId,
       savedTime: saved.time,
       videoDurationAtEntry: video.duration,
@@ -247,16 +381,17 @@ const resumeManager = (() => {
     // no duration value could make shouldResume() true, so don't pay for the
     // metadata wait (D-038) just to fail the bounds check anyway.
     if (!timeUtils.meetsMinimumWatched(saved.time, minWatchSeconds)) {
-      debugLogger.log('tryResume:belowMinimum', { savedTime: saved.time });
-      return;
+      debugLogger.log('tryResume:belowMinimum', { attemptId, savedTime: saved.time });
+      return outcome(OUTCOME.INELIGIBLE, 'below-minimum', saved.time, video.currentTime, attemptId);
     }
 
     // F04/R5 — resolve current content identity (defer through ads, obtain
     // real content metadata) BEFORE evaluating eligibility. A short ad's
     // duration must never disqualify a long saved content position.
     const metadataResult = await establishContentMetadata(video, isCurrent, forceMetadataRefresh);
-    if (!isCurrent()) return;
+    if (!isCurrent()) return outcome(OUTCOME.CANCELLED, 'generation-superseded', saved.time, video.currentTime, attemptId);
     debugLogger.log('tryResume:metadataResolved', {
+      attemptId,
       ok: metadataResult.ok,
       reason: metadataResult.reason,
       videoDuration: video.duration,
@@ -267,23 +402,25 @@ const resumeManager = (() => {
       } else if (metadataResult.reason === 'metadata-timeout') {
         console.warn('[YTResume] Metadata wait failed:', metadataResult.error.message);
       }
-      return;
+      return outcome(OUTCOME.FAILED, metadataResult.reason, saved.time, video.currentTime, attemptId);
     }
 
     // Validate resume conditions against real, post-ad content metadata
     const shouldResumeResult = timeUtils.shouldResume(saved.time, video.duration, minWatchSeconds, completionThreshold);
     debugLogger.log('tryResume:shouldResume', {
+      attemptId,
       result: shouldResumeResult,
       savedTime: saved.time,
       duration: video.duration,
     });
     if (!shouldResumeResult) {
-      return; // Conditions not met — exit silently
+      return outcome(OUTCOME.INELIGIBLE, 'not-eligible', saved.time, video.currentTime, attemptId);
     }
 
     const eligibleDuration = video.duration;
 
     debugLogger.log('tryResume:isAdPlaying:beforeWait', {
+      attemptId,
       isAdPlaying: playerObserver.isAdPlaying(),
       currentTime: video.currentTime,
     });
@@ -295,29 +432,30 @@ const resumeManager = (() => {
     let preDelayTime;
     let round = 0;
     for (;;) {
-      if (!isCurrent()) return;
+      if (!isCurrent()) return outcome(OUTCOME.CANCELLED, 'generation-superseded', saved.time, video.currentTime, attemptId);
 
       if (playerObserver.isAdPlaying()) {
         const adCleared = await waitForAdClear(isCurrent);
-        if (!isCurrent()) return;
-        debugLogger.log('tryResume:adWait', { cleared: adCleared });
+        if (!isCurrent()) return outcome(OUTCOME.CANCELLED, 'generation-superseded', saved.time, video.currentTime, attemptId);
+        debugLogger.log('tryResume:adWait', { attemptId, cleared: adCleared });
         if (!adCleared) {
           console.warn('[YTResume] Resume abandoned: ad did not clear within 60s');
-          return;
+          return outcome(OUTCOME.FAILED, 'ad-timeout', saved.time, video.currentTime, attemptId);
         }
 
         // F04 — a mid-roll can swap the media source. Revalidate that the
         // content metadata we evaluated eligibility against still holds
         // before proceeding; don't seek against a stale decision.
         const revalidated = await establishContentMetadata(video, isCurrent);
-        if (!isCurrent()) return;
+        if (!isCurrent()) return outcome(OUTCOME.CANCELLED, 'generation-superseded', saved.time, video.currentTime, attemptId);
         if (!revalidated.ok || Math.abs(video.duration - eligibleDuration) > 1) {
           debugLogger.log('tryResume:revalidationFailed', {
+            attemptId,
             ok: revalidated.ok,
             durationNow: video.duration,
             eligibleDuration,
           });
-          return;
+          return outcome(OUTCOME.FAILED, 'revalidation-failed', saved.time, video.currentTime, attemptId);
         }
       }
 
@@ -327,9 +465,10 @@ const resumeManager = (() => {
 
       // Buffer for YouTube player initialization race
       await delay(RESUME_DELAY_MS);
-      if (!isCurrent()) return;
+      if (!isCurrent()) return outcome(OUTCOME.CANCELLED, 'generation-superseded', saved.time, video.currentTime, attemptId);
 
       debugLogger.log('tryResume:isAdPlaying:afterDelay', {
+        attemptId,
         isAdPlaying: playerObserver.isAdPlaying(),
         currentTime: video.currentTime,
       });
@@ -337,64 +476,83 @@ const resumeManager = (() => {
       if (!playerObserver.isAdPlaying()) break;
 
       round += 1;
-      debugLogger.log('tryResume:adDuringDelay', { round });
+      debugLogger.log('tryResume:adDuringDelay', { attemptId, round });
       if (round >= AD_ROUND_MAX_ATTEMPTS) {
         console.warn('[YTResume] Resume abandoned: ad kept reappearing during resume delay');
-        return;
+        return outcome(OUTCOME.FAILED, 'ad-flapping', saved.time, video.currentTime, attemptId);
       }
       // loop: re-defer to the ad wait, then re-baseline preDelayTime
     }
 
-    // Guard: abort only on genuine user seek — natural playback drift during
-    // the delay (D-037: including YouTube's own native resume landing near
-    // the saved position) must not trip this.
-    const driftLimit = preDelayTime + RESUME_DELAY_MS / 1000 + DRIFT_TOLERANCE_S;
-    const guardAborted = video.currentTime > driftLimit;
-    debugLogger.log('tryResume:guardCheck', {
+    // Phase 5 (task 5.3/5.4, F08) — a bounded stabilization check that
+    // distinguishes native interference (proceed with the resume anyway,
+    // overriding it) from genuine user intent (cancel outright and let this
+    // become a normal, user-directed session) using direction-agnostic
+    // drift plus a recent-input correlation, not fixed forward magnitude.
+    const stabilization = checkStabilization(video, preDelayTime, RESUME_DELAY_MS);
+    debugLogger.log('tryResume:stabilizationCheck', {
+      attemptId,
       currentTime: video.currentTime,
       preDelayTime,
-      driftLimit,
-      aborted: guardAborted,
+      jumped: stabilization.jumped,
+      userSeek: stabilization.userSeek,
     });
-    if (guardAborted) return;
+    if (stabilization.userSeek) {
+      return outcome(OUTCOME.CANCELLED, 'user-seek', saved.time, video.currentTime, attemptId);
+    }
 
     const resumeTime = timeUtils.getResumeTime(saved.time, rewindSeconds);
-    debugLogger.log('tryResume:resumeTime', { resumeTime });
+    debugLogger.log('tryResume:resumeTime', { attemptId, resumeTime });
 
-    const seekOk = await seekWithVerification(video, resumeTime);
-    if (!isCurrent()) return;
-
-    if (debugLogger.DEBUG) {
-      setTimeout(() => {
-        debugLogger.log('tryResume:after1000ms', { currentTime: video.currentTime });
-      }, 1000);
-    }
+    const seekResult = await seekWithVerification(video, resumeTime, isCurrent);
+    if (!isCurrent()) return outcome(OUTCOME.CANCELLED, 'generation-superseded', saved.time, video.currentTime, attemptId);
 
     // PRD §5.6: the Restart button (and, by the same logic, the toast) must
     // appear only when the seek was successfully applied AND verified — not
     // on a best-effort basis. Showing them after a failed verification is
-    // actively misleading: the toast claims a position the video never
-    // actually landed on (observed live: toast said 19:58, playback
-    // continued from 19:40 — YouTube's own resume cue kept overriding ours
-    // during the verify window).
-    if (!seekOk) {
+    // actively misleading.
+    if (!seekResult.ok) {
       console.warn('[YTResume] Seek could not be verified after 3 attempts');
-      debugLogger.log('tryResume:seekUnverified', { currentTime: video.currentTime });
-      return;
+      debugLogger.log('tryResume:seekUnverified', { attemptId, currentTime: video.currentTime, reason: seekResult.reason });
+      const status = seekResult.reason === 'seek-threw' ? OUTCOME.FAILED : OUTCOME.PENDING;
+      return outcome(status, seekResult.reason, saved.time, video.currentTime, attemptId);
     }
 
     // Roadmap 3.4 — YouTube's own native resume can override our verified
-    // seek shortly after; re-assert once against it before showing UI.
-    await reassertIfNativeOverride(video, resumeTime);
-    if (!isCurrent()) return;
+    // seek shortly after; re-assert once against it before showing UI. A
+    // throw here is a real failure now (R3), never swallowed into success.
+    const reassertResult = await verifyAndReassert(video, resumeTime, isCurrent);
+    if (!isCurrent()) return outcome(OUTCOME.CANCELLED, 'generation-superseded', saved.time, video.currentTime, attemptId);
+    if (!reassertResult.ok) {
+      debugLogger.log('tryResume:reassertFailed', { attemptId, reason: reassertResult.reason });
+      return outcome(OUTCOME.FAILED, reassertResult.reason, saved.time, video.currentTime, attemptId);
+    }
+    if (reassertResult.userOverride) {
+      // The user moved playback themselves during the reassert window —
+      // that's not our resume succeeding, and not a failure either; no
+      // success UI, and the session becomes normal user-directed playback.
+      return outcome(OUTCOME.USER_OVERRIDDEN, 'user-override', saved.time, video.currentTime, attemptId);
+    }
+
+    // Phase 5 (R2) — the single 500ms check above is not the end of native-
+    // override risk; keep watching a bounded while longer, in the
+    // background, without blocking this outcome or bootstrap's arm().
+    monitorForLateOverride(video, resumeTime, isCurrent);
+
+    if (debugLogger.DEBUG) {
+      setTimeout(() => {
+        debugLogger.log('tryResume:after1000ms', { attemptId, currentTime: video.currentTime });
+      }, 1000);
+    }
 
     // T7.7/T7.8/T7.9: the seek itself is unconditional — only the UI is
     // settings-gated. Off means zero injected DOM, not "resume disabled".
     if (showRestartButton) uiInjector.showRestartButton(video, videoId);
     if (showToast) uiInjector.showToast(resumeTime);
+
+    return outcome(OUTCOME.VERIFIED, 'ok', saved.time, video.currentTime, attemptId);
   }
 
-  return { tryResume };
+  return { tryResume, OUTCOME };
 })();
-
 

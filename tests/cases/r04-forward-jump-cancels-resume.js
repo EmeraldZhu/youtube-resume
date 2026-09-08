@@ -22,7 +22,12 @@ module.exports = {
     h.clock.setTimeout(() => { video.currentTime = 120; }, 200); // "halfway" through the 400ms delay
 
     const p = h.resumeManager.tryResume(video, { time: 3600 }, 'vid00000004', {});
-    await h.clock.advance(1000);
+    // Phase 5: a native jump with no corroborating user input no longer
+    // aborts resume outright (F08) — it proceeds through the full seek +
+    // verify + reassert pipeline (~1150ms), so this must advance far enough
+    // for tryResume() to actually settle, not just past the old guard's
+    // early-abort point.
+    await h.clock.advance(2000);
     await p;
 
     const toast = h.document.querySelector('#yt-resume-toast');

@@ -663,6 +663,52 @@ timer of its own, only sequencing around the existing 400ms delay and seek-verif
 - If an ad never clears within 60s, skip resume for this video
 - Seek verification failing after 3 attempts logs a warning; Restart button/toast are **not** shown (PRD §5.6 — UI requires a verified seek, not just a best-effort one)
 
+#### Phase 5 additions (Roadmap v4, D-155–D-160) — typed outcomes and verified seeks
+
+`tryResume()` now returns `Promise<Outcome>` instead of `Promise<void>`:
+
+```typescript
+type Outcome = {
+  status: 'verified' | 'pending' | 'deferred' | 'cancelled' | 'user-overridden' | 'ineligible' | 'failed';
+  reason: string;        // e.g. 'below-minimum', 'ad-timeout', 'seek-not-settled', 'user-seek', 'ok'
+  target: number;        // saved.time
+  observed: number;      // video.currentTime when the outcome was decided
+  attemptId: string;     // diagnostics only, never surfaced to the user
+};
+resumeManager.OUTCOME: { VERIFIED, PENDING, DEFERRED, CANCELLED, USER_OVERRIDDEN, INELIGIBLE, FAILED }
+```
+
+Three mechanisms replace the old fixed-delay/fixed-magnitude checks (F01/F08):
+
+- **`isPositionSettled(video, target)`** (replaces plain drift-only comparison, R1): a seek only
+  counts as settled when `!video.seeking`, `video.readyState >= HAVE_CURRENT_DATA (2)`, **and**
+  drift ≤ `SEEK_TOLERANCE_S`. `seekWithVerification()` now returns `{ok, reason}` using this check.
+- **`checkStabilization(video, preDelayTime, elapsedMs)`** (replaces the old fixed-magnitude
+  `driftLimit`/forward-only guard, D-021/R4/F08): computes an expected position from elapsed time and
+  `video.playbackRate` (0 expected drift while `video.paused`), flags any drift beyond
+  `DRIFT_TOLERANCE_S` in **either** direction as a jump, then consults `userIntent.wasRecentInput()`
+  (new `utils/userIntent.js`, D-155) — a keydown/pointerdown/mousedown within `USER_INPUT_WINDOW_MS`
+  (800ms). Corroborated → cancel resume outright (`CANCELLED`/`'user-seek'`). Uncorroborated → treat
+  as native interference and proceed with the seek anyway (overriding it), never an outright abort by
+  magnitude alone.
+- **`verifyAndReassert()`** (replaces `reassertIfNativeOverride`, R2/R3): the existing 500ms check now
+  returns a typed result instead of swallowing a thrown corrective re-seek — a throw is `FAILED`, not
+  a silently-successful toast. A drift corroborated by `userIntent` at this point is accepted as
+  `USER_OVERRIDDEN`, not corrected over.
+- **`monitorForLateOverride()`** (new, R2): after a `VERIFIED` outcome, a bounded (`MONITOR_ROUNDS = 4`
+  × `MONITOR_INTERVAL_MS = 500`, ~2s) background poll — not part of `tryResume()`'s awaited chain, so
+  it never blocks `bootstrap.js`'s arm() — keeps watching for a native override YouTube's own restore
+  cue can still apply several seconds after the initial verified seek, standing down immediately if
+  `userIntent` shows real input (never fights a genuine user action).
+
+Success UI (`showRestartButton`/`showToast`) is now gated on `status === VERIFIED` specifically, not
+merely "seek didn't throw" — `USER_OVERRIDDEN`, `PENDING`, `CANCELLED`, `INELIGIBLE`, and `FAILED` all
+show nothing.
+
+**D-107/F20 timestamp precedence** lives in `bootstrap.js`, not here: an explicit, valid `t=` value
+(`youtubeUtils.getTimestampSeconds()`) skips the `tryResume()` call entirely for that navigation —
+YouTube's own player performs the actual seek, so there is no outcome to type for it.
+
 ---
 
 ### 4.5 `progressTracker.js`
@@ -871,6 +917,42 @@ let hasUserSeek: boolean = false;   // true once this session has produced a rea
   `null` in `stop()`).
 
 See §4.6a below for the writer-side half of the freshness check.
+
+#### Phase 5 additions (Roadmap v4, D-155–D-160)
+
+```typescript
+progressTracker.protectCheckpoint(time: number): void  // new
+progressTracker.markUserDirected(): void                // new
+```
+
+- **`attemptSave(bypassDelta, trigger, bypassBackwardJumpGuard = bypassDelta)`** gains a third
+  parameter (F05/R8) and now returns `{ok: boolean, reason?: string}` instead of `void`. Previously
+  one flag (`bypassDelta`) controlled both the delta guard and the backward-jump guard, so every event
+  trigger — including `'seeked'` — skipped the backward-jump guard unconditionally; a native jump
+  followed by a synthetic `'seeked'` saved straight through it. The `'seeked'` call site now passes
+  `bypassBackwardJumpGuard = userIntent.wasRecentInput(SEEK_CORROBORATION_WINDOW_MS = 2000)` — a real
+  keydown/pointerdown/mousedown within that window corroborates it as a genuine deliberate seek
+  (exempt, as before); an uncorroborated `'seeked'` is now subject to the same guard an interval save
+  faces. `pause`/`ended`/`visibility`/`pagehide` are unaffected (default stays `bypassDelta`, unchanged
+  behavior).
+- **`handleSeeked`** (F08/R9) now resets `lastAttemptedTime` to the new position on every `'seeked'`
+  event — even one `attemptSave` rejected for `belowMinWatch` — so a deliberate rewind below
+  `minWatchSeconds` doesn't leave a stale high baseline that rejects the next legitimate interval save
+  once playback crosses the threshold again. The one exception: an *uncorroborated*
+  `'backwardJumpRejected'` result leaves the baseline untouched, preserving the R8 protection above.
+- **`protectCheckpoint(time)`** (F05/R7) — called by `bootstrap.js` between `start()` and `arm()`
+  whenever a resume attempt for an existing saved checkpoint did not reach a `VERIFIED` (or otherwise
+  established user-directed) outcome. Seeds `committedTime`/`lastAttemptedTime` to the checkpoint's
+  `time` instead of the actual (low) startup position `start()` captured, so an ordinary interval save
+  from wherever playback actually began now reads as a large backward jump against the *protected*
+  baseline and is rejected — instead of silently overwriting a much higher stored value. `arm()` itself
+  stays unconditional in `bootstrap.js`'s `finally` (tracking must keep working after a failed resume,
+  per CLAUDE.md); this protects the checkpoint rather than withholding arming.
+- **`markUserDirected(time)`** (F20) — sets `hasUserSeek = true` and calls `recordActivity()` without
+  touching position baselines. Called by `bootstrap.js` for a `t=` timestamp navigation (no native
+  `'seeked'` DOM event occurs — the video simply starts at that position) and for a resume outcome
+  that establishes user-direction (`USER_OVERRIDDEN`, or `CANCELLED`/`'user-seek'`) — explicit, rather
+  than relying solely on the native `'seeked'` handler's own (possibly not-yet-run) side effect.
 
 ---
 

@@ -11,6 +11,7 @@
  *   youtubeUtils.isLive(video)     → boolean
  *   youtubeUtils.getTitle()        → string | null
  *   youtubeUtils.getChannelName()  → string | null
+ *   youtubeUtils.getTimestampSeconds() → number | null
  */
 
 const youtubeUtils = {
@@ -99,6 +100,34 @@ const youtubeUtils = {
     }
 
     return null;
+  },
+
+  /**
+   * D-107/F20/Phase 5: parses a supported `t=` value from the current URL —
+   * plain seconds ("90", "90s") or a compound "1h2m3s"-style duration (any
+   * subset of h/m/s, in that order). Returns null for an absent, malformed,
+   * or negative value; never throws. An explicit valid value takes
+   * precedence over automatic saved-position resume for this navigation
+   * (bootstrap.js), so a bad parse must fail closed to "no timestamp",
+   * never to a wrong number.
+   */
+  getTimestampSeconds() {
+    const raw = new URLSearchParams(window.location.search).get('t');
+    if (!raw) return null;
+
+    if (/^\d+s?$/.test(raw)) {
+      const n = parseInt(raw, 10);
+      return Number.isFinite(n) && n >= 0 ? n : null;
+    }
+
+    const match = raw.match(/^(?:(\d+)h)?(?:(\d+)m)?(?:(\d+)s)?$/);
+    if (!match || !(match[1] || match[2] || match[3])) return null;
+
+    const hours = parseInt(match[1] || '0', 10);
+    const minutes = parseInt(match[2] || '0', 10);
+    const seconds = parseInt(match[3] || '0', 10);
+    const total = hours * 3600 + minutes * 60 + seconds;
+    return Number.isFinite(total) && total >= 0 ? total : null;
   },
 };
 

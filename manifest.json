@@ -20,6 +20,7 @@
         "utils/debugLogger.js",
         "utils/youtubeUtils.js",
         "utils/timeUtils.js",
+        "utils/userIntent.js",
         "content/playerObserver.js",
         "content/uiInjector.js",
         "content/resumeManager.js",

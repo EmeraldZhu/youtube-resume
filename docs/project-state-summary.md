@@ -18,7 +18,7 @@ Phases 4–9 are still planning only.
 | 2 | Serialized Storage Writer | DONE | — |
 | 3 | Write Ownership, Freshness & Durable Saves | DONE | — |
 | 4 | Resume Identity & Cancellation | AWAITING VERIFICATION | — |
-| 5 | Verified Resume Outcomes | NOT STARTED | — |
+| 5 | Verified Resume Outcomes | AWAITING VERIFICATION | — |
 | 6 | Deferred Recovery Lifecycle | NOT STARTED | — |
 | 7 | Completion Policy & Remove Completed | NOT STARTED | — |
 | 8 | Popup Reconciliation & Accessibility | NOT STARTED | — |
@@ -46,17 +46,19 @@ A phase is `DONE` only when the owner confirms it. Claude Code never writes `DON
 
 ## Next action
 
-Phase 4 AWAITING VERIFICATION: `bootstrap.js` gained a generation token checked after every await
-before any seek/save/arm/UI action (fixes R21/R22 — a stale navigation can't take over or arm a newer
-one's tracker). `playerObserver.disconnect()` now settles a pending `waitForVideo()` (R12).
-`resumeManager` resolves real, post-ad content metadata before evaluating eligibility, so a short ad's
-duration can't disqualify a long saved position (R5), with mid-ad revalidation and a reused-element
-metadata-freshness check (D-146–D-151). Self-verified via `node tests/run.js`: R5/R12/R21/R22 all flip
-to `not-reproduced`; 4 new cases (T4.1/T4.2/T4.4/T4.7, D-152) pass; zero regressions. Live verified via
-`chrome-devtools-mcp` (D-153, DONE): a real 2-ad pre-roll never disqualified eligibility and abandoned
-cleanly at the 60s ceiling; an ad-free video resumed end-to-end with a verified seek; rapid A→B→C
-navigation produced zero wrong-ID or stale saves. Decisions D-146–D-153. Nothing else blocking (see
-DECISIONS.md "Currently blocking", D-034, non-blocking).
+Phase 5 AWAITING VERIFICATION: `tryResume()` returns a typed outcome (`resumeManager.OUTCOME`) instead
+of void; seek verification checks `seeking`/`readyState`, not just proximity (R1); a bounded background
+monitor catches a late native override (R2); a thrown corrective re-seek is a typed failure, never a
+swallowed success (R3). The fixed-magnitude jump guard is replaced by a stabilization check gated on
+real input (new `utils/userIntent.js`) — an uncorroborated jump no longer cancels resume outright (R4).
+`progressTracker`'s backward-jump guard now applies to an uncorroborated `'seeked'` too (R8) while still
+letting a corroborated deliberate rewind through regardless of size; its baseline resets on every
+`'seeked'` so a below-minimum rewind doesn't block the next interval save (R9). New
+`protectCheckpoint()`/`markUserDirected()` protect a checkpoint through a non-established outcome (R7)
+and mark a `t=` timestamp navigation (D-107/F20) or established user-directed outcome authoritative.
+Self-verified via `node tests/run.js`: R1/R2/R3/R4/R7/R8/R9 flip to `not-reproduced`; 7 new T5 cases
+pass; zero regressions (46 cases total; R6/R10/R11 remain `reproduces` — Phase 6 scope). Decisions
+D-155–D-166. Nothing else blocking (DECISIONS.md "Currently blocking", D-034, non-blocking).
 
 ## Doc versions
 

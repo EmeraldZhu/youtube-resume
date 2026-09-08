@@ -305,6 +305,8 @@ A URL-polling fallback activates if `yt-navigate-finish` has not fired within 2 
 
 > **`beforeunload` is retired.** v1.0 claimed a synchronous `chrome.storage.local` save during unload. That API is asynchronous and frequently does not complete during teardown. `pagehide` combined with the `visibilitychange` save is materially more reliable. Both remain best-effort and must be documented as such.
 
+> **v4 Phase 5 correction (F05/R8):** an unconditional `seeked` save is only safe when the seek is corroborated by real keyboard/pointer input in the last ~2 seconds. A native jump can fire `seeked` too; an uncorroborated one is now checked against the same large-backward-jump guard an interval save faces, instead of saving through it unconditionally.
+
 **Tracking must be skipped when:**
 - `video.duration === Infinity` (live stream)
 - The URL matches an excluded pattern (§5.1)
@@ -352,15 +354,19 @@ Default `rewindSeconds` is 2, restoring narrative context lost since the last sa
 
 The seek must be delayed **400ms** after the video element is ready. YouTube's player initialization can override an immediate seek. This value is **not user-configurable** — exposing it invites users to silently break their own resume.
 
-**Manual-seek abort guard (revised in v2.0):**
+**Manual-seek abort guard (revised in v2.0; direction/intent-aware since v4 Phase 5):**
 
 The v1.0 guard aborted if `video.currentTime > 5` after the delay. This was incorrect: during a pre-roll ad, `currentTime` reflects **ad** position, so any ad longer than 5 seconds silently cancelled the resume.
 
-The v2.0 guard compares against the position recorded immediately before the delay, aborting only if playback has moved more than 10 seconds beyond natural drift. It does not evaluate while an ad is active.
+The v2.0 guard compared against the position recorded immediately before the delay, aborting on any forward movement beyond 10 seconds of natural drift — by magnitude alone, regardless of cause. v4 Phase 5 found this both over- and under-inclusive (F08): a native jump with no genuine user action behind it doesn't deserve to cancel resume at all, while a real backward seek could theoretically go unrecognized. The guard now checks direction-agnostic drift against elapsed time and playback rate (0 expected drift while paused), then asks whether the drift correlates with an actual keyboard/pointer/accessible-control interaction in the last 800ms — not the `seeked` event alone, which a native jump can also fire. Corroborated → this is a deliberate user seek; cancel automatic resume outright and track the rest of the session normally, as if the user had always been driving. Uncorroborated → native interference; proceed with the resume anyway, overriding it.
 
-**Seek verification (new in v2.0):**
+**Seek verification (new in v2.0; readiness-aware since v4 Phase 5):**
 
-After assignment, the extension re-reads `currentTime` after 250ms. If the actual position is more than 3 seconds from target, it re-assigns, to a maximum of 3 attempts. Unbounded retry loops are prohibited.
+After assignment, the extension re-reads `currentTime` after 250ms. v4 Phase 5 found numeric proximity alone insufficient (F01/R1): a seek mid-flight (`video.seeking === true`, or a frame that hasn't actually loaded) can read as numerically close without having landed. A seek now counts as verified only when `!seeking`, `readyState` indicates the frame has loaded, **and** drift is within 3 seconds — re-assigning otherwise, to a maximum of 3 attempts. Unbounded retry loops remain prohibited; a seek that never settles within that bounded window is reported internally as a *pending* outcome — never silently treated as success, and never retried indefinitely — a session that never becomes ready this way is Phase 6's Deferred Recovery Lifecycle to complete later.
+
+A verified seek is not the end of native-override risk either (F01/R2): YouTube's own restore cue can still move playback several seconds later. A bounded (~2s) background check keeps watching after the seek settles and corrects a late override, standing down immediately if it detects genuine user input instead.
+
+**Timestamp precedence (new in v4 Phase 5, D-107/F20):** if the navigation URL carries an explicit, valid `t=` value, it wins outright for that navigation — automatic saved-position resume is cancelled before it starts, and the resulting playback is tracked as an ordinary user-directed session from the beginning, not specially protected. YouTube's own player performs the actual timestamp seek; the extension's only job is not to fight it with a competing saved-position seek. An absent or malformed `t=` value is ignored and automatic resume proceeds normally.
 
 ---
 

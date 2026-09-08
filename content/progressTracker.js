@@ -9,6 +9,8 @@
  *   progressTracker.stop()                          → void
  *   progressTracker.tick()                          → void
  *   progressTracker.arm()                           → void
+ *   progressTracker.protectCheckpoint(time)         → void
+ *   progressTracker.markUserDirected()              → void
  *   progressTracker.notifyExternalReset()           → void
  */
 
@@ -82,6 +84,13 @@ const progressTracker = (() => {
   // position before the next interval tick runs, so no separate "recent
   // seek" flag is needed.
   const BACKWARD_JUMP_THRESHOLD_S = 30;
+  // Phase 5 (task 5.4/F05/R8) — how recent a keydown/pointerdown/mousedown
+  // must be for a 'seeked' event to count as corroborated user intent,
+  // exempting it from the backward-jump guard. Wider than resumeManager's
+  // 800ms window (F08's native-vs-user distinction during a short 400ms
+  // delay) since a real scrubber drag can take a couple of seconds from
+  // first touch to the eventual 'seeked' event.
+  const SEEK_CORROBORATION_WINDOW_MS = 2000;
 
   // Bound handler references for proper removal
   let handlePause = null;
@@ -99,8 +108,17 @@ const progressTracker = (() => {
    *   Only the interval trigger passes false (D-024); every event
    *   trigger (pause/seeked/ended/visibilitychange/pagehide) saves
    *   unconditionally.
+   * @param {boolean} [bypassBackwardJumpGuard=bypassDelta] - If true, skip
+   *   the backward-jump guard too. Defaults to bypassDelta (preserving the
+   *   original one-flag behavior for pause/ended/visibility/pagehide — a
+   *   passive lifecycle event, never a seek). The 'seeked' call site passes
+   *   this explicitly false (Phase 5, F05/R8): a native jump immediately
+   *   followed by a synthetic 'seeked' must still be caught by the
+   *   backward-jump guard, not waved through just because it's an event
+   *   trigger.
+   * @returns {{ok: boolean, reason?: string}}
    */
-  function attemptSave(bypassDelta, trigger) {
+  function attemptSave(bypassDelta, trigger, bypassBackwardJumpGuard = bypassDelta) {
     // Phase 0 (v3) diagnostic — logged on every call, before any guard can
     // return early, per Roadmap v3 0.3 (videoId, trigger, position-to-write).
     debugLogger.log('attemptSave:entry', {
@@ -109,18 +127,18 @@ const progressTracker = (() => {
       currentTime: activeVideo ? activeVideo.currentTime : null,
     });
 
-    if (!activeVideo || !activeVideoId) return;
+    if (!activeVideo || !activeVideoId) return { ok: false, reason: 'noActiveVideo' };
     if (!armed) {
       debugLogger.log('attemptSave:skipped', { videoId: activeVideoId, trigger, reason: 'disarmed' });
-      return; // Roadmap 3.1 — no write until the resume lifecycle has resolved
+      return { ok: false, reason: 'disarmed' }; // Roadmap 3.1 — no write until the resume lifecycle has resolved
     }
     if (playerObserver.isAdPlaying()) {
       debugLogger.log('attemptSave:skipped', { videoId: activeVideoId, trigger, reason: 'adPlaying' });
-      return;
+      return { ok: false, reason: 'adPlaying' };
     }
     if (activeVideo.duration === Infinity) {
       debugLogger.log('attemptSave:skipped', { videoId: activeVideoId, trigger, reason: 'liveStream' });
-      return; // live stream guard
+      return { ok: false, reason: 'liveStream' }; // live stream guard
     }
 
     const current = Math.floor(activeVideo.currentTime);
@@ -128,25 +146,27 @@ const progressTracker = (() => {
 
     if (Number.isNaN(current) || current < 0 || Number.isNaN(duration) || current > duration) {
       debugLogger.log('attemptSave:skipped', { videoId: activeVideoId, trigger, reason: 'invalidPosition', current, duration });
-      return; // invalid position guard
+      return { ok: false, reason: 'invalidPosition' }; // invalid position guard
     }
 
     if (!timeUtils.meetsMinimumWatched(current, minWatchSeconds)) {
       debugLogger.log('attemptSave:skipped', { videoId: activeVideoId, trigger, reason: 'belowMinWatch', current, minWatchSeconds });
-      return; // Roadmap 7.5 — no storage entry for a video watched less than this
+      return { ok: false, reason: 'belowMinWatch' }; // Roadmap 7.5 — no storage entry for a video watched less than this
     }
 
-    // Roadmap 3.6 — regression guard: an interval-triggered save landing far
-    // below the last known-good position is treated as a spurious read
-    // (defect C's mechanism, Phase 0 finding 0.8) and rejected outright.
-    // Interval-only: every event trigger (seeked/pause/ended/visibility/
-    // pagehide) represents observed user intent or a session boundary and is
-    // exempt by construction (D-024's bypassDelta=true already marks them).
-    if (!bypassDelta && (lastAttemptedTime - current) > BACKWARD_JUMP_THRESHOLD_S) {
+    // Roadmap 3.6 — regression guard: a save landing far below the last
+    // known-good position is treated as a spurious read (defect C's
+    // mechanism, Phase 0 finding 0.8) and rejected outright. Interval saves
+    // are never exempt; event triggers are exempt only when
+    // bypassBackwardJumpGuard is true — pause/ended/visibility/pagehide
+    // represent a session boundary, not a position claim, but 'seeked'
+    // (Phase 5/F05/R8) is a position claim and stays subject to this guard
+    // unless corroborated elsewhere.
+    if (!bypassBackwardJumpGuard && (lastAttemptedTime - current) > BACKWARD_JUMP_THRESHOLD_S) {
       debugLogger.log('attemptSave:skipped', {
         videoId: activeVideoId, trigger, reason: 'backwardJumpRejected', current, lastAttemptedTime,
       });
-      return;
+      return { ok: false, reason: 'backwardJumpRejected' };
     }
 
     // Delta guard — interval trigger only (D-024) — but only while the
@@ -165,7 +185,7 @@ const progressTracker = (() => {
       committedTime,
       dirty,
     });
-    if (deltaBlocked) return;
+    if (deltaBlocked) return { ok: false, reason: 'deltaBlocked' };
 
     dirty = true;
     lastAttemptedTime = current;
@@ -189,6 +209,8 @@ const progressTracker = (() => {
       // attempt keeps the sample dirty for its own eventual ack.
       if (seq === writeSeq) dirty = false;
     }).catch(err => console.warn('[YTResume] Save failed:', err.message));
+
+    return { ok: true };
   }
 
   /**
@@ -228,7 +250,35 @@ const progressTracker = (() => {
 
     // Event-based triggers — all save unconditionally (D-024)
     handlePause = () => attemptSave(true, 'pause');
-    handleSeeked = () => { hasUserSeek = true; recordActivity(); attemptSave(true, 'seeked'); };
+    handleSeeked = () => {
+      hasUserSeek = true;
+      recordActivity();
+      const current = Math.floor(video.currentTime);
+      // Phase 5 (task 5.4/5.8/F05/R8) — a 'seeked' event corroborated by
+      // recent keyboard/pointer input (a real scrubber drag or arrow-key
+      // seek) is genuine user intent and stays exempt from the backward-
+      // jump guard, same as before (CLAUDE.md: deliberate rewind must keep
+      // working even to a position well above minWatchSeconds — a large,
+      // real rewind is common and legitimate). An UNcorroborated 'seeked'
+      // (a native jump with no input behind it) no longer gets that
+      // exemption for free — it's now subject to the same guard an
+      // interval save would face.
+      const corroborated = userIntent.wasRecentInput(SEEK_CORROBORATION_WINDOW_MS);
+      const result = attemptSave(true, 'seeked', corroborated);
+      // Phase 5 (task 5.5/F08/R9) — reset the backward-jump guard's baseline
+      // to the new position on every seeked event, EVEN when the save
+      // itself was rejected (e.g. below minWatchSeconds) — otherwise a
+      // deliberate rewind leaves a stale high baseline that rejects the
+      // next legitimate interval save once playback crosses the threshold
+      // again. The one exception is an UNcorroborated 'backwardJumpRejected'
+      // result (Phase 5/F05/R8): that means this looked like unattributed
+      // native interference, not a deliberate seek, so the baseline must
+      // stay put to keep protecting against a follow-up low-position
+      // interval save.
+      if (corroborated || result.reason !== 'backwardJumpRejected') {
+        lastAttemptedTime = current;
+      }
+    };
     handleEnded = () => { recordActivity(); attemptSave(true, 'ended'); };
     handleVisibility = () => {
       if (document.hidden) attemptSave(true, 'visibility');
@@ -271,6 +321,44 @@ const progressTracker = (() => {
   function arm() {
     armed = true;
     debugLogger.log('progressTracker:armed', { videoId: activeVideoId });
+  }
+
+  /**
+   * Phase 5 (task 5.7/F05/R7) — seeds the backward-jump guard's baseline
+   * (and the delta guard's committedTime) to a known checkpoint instead of
+   * the actual (low) playback position start() captured. Called by
+   * bootstrap.js between start() and arm() whenever a resume attempt did
+   * not reach a verified, established outcome for an existing saved
+   * checkpoint — protects that checkpoint through a pending/recoverable
+   * failure: an ordinary interval save at the real (low) startup position
+   * now reads as a large backward jump against the protected baseline and
+   * is rejected, instead of silently overwriting a much higher stored
+   * value. Released the normal way once playback genuinely catches up past
+   * the checkpoint, or by a real user-directed seek (notifyExternalReset,
+   * or a corroborated 'seeked').
+   */
+  function protectCheckpoint(time) {
+    const t = Math.floor(time);
+    committedTime = t;
+    lastAttemptedTime = t;
+    debugLogger.log('progressTracker:checkpointProtected', { videoId: activeVideoId, time: t });
+  }
+
+  /**
+   * Phase 5 (task 5.10/F20) — marks this session as explicitly user-
+   * directed without touching the position baselines protectCheckpoint
+   * seeds or resetting them the way notifyExternalReset does. Called by
+   * bootstrap.js for a t= timestamp navigation: there is no native
+   * 'seeked' DOM event to set hasUserSeek the normal way (the video simply
+   * starts at that position — nothing was seeked away from), but
+   * storageManager's write-ownership/freshness check (Phase 3) still needs
+   * `explicitUserSeek: true` to treat this session's saves as
+   * authoritative rather than stale against an older stored `updated`.
+   */
+  function markUserDirected() {
+    hasUserSeek = true;
+    recordActivity();
+    debugLogger.log('progressTracker:markedUserDirected', { videoId: activeVideoId });
   }
 
   /**
@@ -326,7 +414,7 @@ const progressTracker = (() => {
     minWatchSeconds = 30;
   }
 
-  return { start, stop, tick, arm, notifyExternalReset };
+  return { start, stop, tick, arm, protectCheckpoint, markUserDirected, notifyExternalReset };
 })();
 
 
