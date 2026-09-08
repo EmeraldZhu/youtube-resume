@@ -17,7 +17,7 @@ Phases 4–9 are still planning only.
 | 1 | Boundary Validation & Safe Repair | DONE | — |
 | 2 | Serialized Storage Writer | DONE | — |
 | 3 | Write Ownership, Freshness & Durable Saves | DONE | — |
-| 4 | Resume Identity & Cancellation | NOT STARTED | — |
+| 4 | Resume Identity & Cancellation | AWAITING VERIFICATION | — |
 | 5 | Verified Resume Outcomes | NOT STARTED | — |
 | 6 | Deferred Recovery Lifecycle | NOT STARTED | — |
 | 7 | Completion Policy & Remove Completed | NOT STARTED | — |
@@ -46,16 +46,16 @@ A phase is `DONE` only when the owner confirms it. Claude Code never writes `DON
 
 ## Next action
 
-Phase 3 DONE (owner-confirmed): per-session write ownership/freshness added to `progressTracker.js`
-(session id, last-active tracking, committed/attempted/dirty position split) and `storageWriter.js`
-(stale-session rejection on `SAVE_PROGRESS`, using the existing `updated` field — no schema bump,
-D-139 reverses an earlier persisted-`revision`/`owner` plan; PRD corrected). Self-verified via
-`node tests/run.js` (R23/R24 fixed, 4 new T3.x cases, 35/35 clean) and live via `chrome-devtools-mcp`
-(D-145): stale-session rejection, explicit-seek override, delete-suppresses-recreation, and a full
-save→pin→unpin→delete→save→clear-all round trip all correct against the real service worker.
-**Gate A closed** (D-144). Decisions D-139–D-145. Begin Phase 4 (Resume Identity & Cancellation) next
-via `docs/PHASE_PROMPTS_v4.md` after `/clear`. Nothing blocking — see `docs/DECISIONS.md` "Currently
-blocking" (D-034, open but non-blocking).
+Phase 4 AWAITING VERIFICATION: `bootstrap.js` gained a generation token checked after every await
+before any seek/save/arm/UI action (fixes R21/R22 — a stale navigation can't take over or arm a newer
+one's tracker). `playerObserver.disconnect()` now settles a pending `waitForVideo()` (R12).
+`resumeManager` resolves real, post-ad content metadata before evaluating eligibility, so a short ad's
+duration can't disqualify a long saved position (R5), with mid-ad revalidation and a reused-element
+metadata-freshness check (D-146–D-151). Self-verified via `node tests/run.js`: R5/R12/R21/R22 all flip
+to `not-reproduced`; 4 new cases (T4.1/T4.2/T4.4/T4.7, D-152) pass; zero regressions. Live
+`chrome-devtools-mcp` verification was blocked by a locked Chrome profile this session (D-153, OPEN) —
+needs the owner's machine. Decisions D-146–D-153. Nothing else blocking (see DECISIONS.md "Currently
+blocking", D-034, non-blocking).
 
 ## Doc versions
 

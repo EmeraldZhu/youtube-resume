@@ -1940,6 +1940,49 @@ This table defines what each module **consumes** and what it **produces**. No mo
 | `popup/popup.js` *(v2 — Phases 6/8)* | `storageManager.js` | Nothing (leaf; runs in its own document, never in page context) |
 | `debugLogger.js` | *(no dependencies)* | `resumeManager.js`, `playerObserver.js`, `progressTracker.js`, `navigationManager.js` (§4.12) |
 
+### 5.1 Generation/Cancellation Contract (v4 Phase 4, F03)
+
+`bootstrap.js` owns a single monotonically increasing `currentGeneration` counter, incremented once
+per `onVideoChange()` call. That call captures its own `generation` and derives `isCurrent = () =>
+generation === currentGeneration` — a closure passed down to `resumeManager.tryResume()`. Because JS
+is single-threaded, comparing a captured number against the shared counter is race-free: once a newer
+navigation increments the counter, every older generation's `isCurrent()` becomes `false` forever,
+with no possibility of it flipping back.
+
+**Where `isCurrent()` is checked** — after every `await` in `bootstrap.js`'s pipeline, and after every
+`await` inside `resumeManager.tryResume()`/`establishContentMetadata()` — before any seek, save, arm
+call, or UI insertion:
+
+- After the settings read (a stale navigation's delayed read must never activate as a newer,
+  already-initialized navigation's tracker — R21).
+- After `playerObserver.waitForVideo()` resolves, paired with `youtubeUtils.getVideoId() === videoId`
+  (element-ownership confirmation, F03 4.3) before treating the resolved `<video>` as ready.
+- After `storageManager.getProgress()` resolves, before calling `tryResume()`.
+- In `onVideoChange()`'s `finally` block, before calling `progressTracker.arm()` — a superseded
+  generation's own resume completing must never arm whichever generation is current now (R22).
+- Inside `tryResume()`/`establishContentMetadata()`: after the ad wait, after the metadata wait,
+  after the resume delay, after `seekWithVerification()`, after `reassertIfNativeOverride()`.
+
+**Settling pending work on teardown** — `onVideoChange()` calls `playerObserver.disconnect()` at the
+start of every invocation (teardown of the previous generation). `disconnect()` now rejects any
+pending `waitForVideo()` promise instead of leaving it unresolved forever (R12 — the audit found a
+20s-later still-unsettled promise here). `resumeManager`'s ad-wait poll (`waitForAdClear()`) also
+takes `isCurrent` and checks it on every `AD_POLL_MS` tick — a recursive `setTimeout` chain, not a
+second `setInterval` (§1.3's one-interval constraint) — so leaving a watch page during an ad settles
+that wait within one tick instead of running for up to the full 60s ceiling (T4.2).
+
+**Element ownership vs. metadata freshness (F04, T4.4)** — `bootstrap.js` also tracks the `<video>`
+element and its `duration` seen at the start of the previous navigation. If a new navigation resolves
+the *same* element with the *same* (non-NaN) `duration` it had before, that's a signal the element may
+still carry the previous content's metadata even though it looks superficially valid — `tryResume()`
+is passed `forceMetadataRefresh = true` and `establishContentMetadata()` gives the element one bounded
+`REUSED_ELEMENT_REFRESH_MS` (1000ms) chance to fire a real `loadedmetadata` event before trusting the
+carried-over value. Eligibility itself is always resolved against confirmed post-ad content metadata,
+never an ad's duration — ad deferral runs *before* `shouldResume()`, not after (F04/R5); a mid-roll ad
+interrupting the resume delay re-runs `establishContentMetadata()` and aborts if the revalidated
+duration disagrees with what eligibility was originally decided against, rather than seeking against a
+stale decision.
+
 ---
 
 ## 6. State Management
@@ -1959,6 +2002,8 @@ There is no global state object. Each module manages its own internal state priv
 | `buttonElement` | `uiInjector` | On `showRestartButton()` | On `cleanup()` or click |
 | `dismissTimer` | `uiInjector` | On `showRestartButton()` | On `cleanup()` or click |
 | `armed` *(v3 — Phase 3, D-066)* | `progressTracker` | `false` on `start()`; `true` via `arm()` after the resume lifecycle resolves | On `stop()`, back to `false` |
+| `currentGeneration` *(v4 — Phase 4, F03)* | `bootstrap.js` | `0`, incremented once per `onVideoChange()` call | Never reset — monotonically increasing for the life of the content script (§5.1) |
+| `lastVideoElement`/`lastVideoDuration` *(v4 — Phase 4, F04)* | `bootstrap.js` | `null` | Overwritten each navigation with the current `<video>`/`duration`, once past the identity check (§5.1) |
 
 ### 6.2 Persistent State
 

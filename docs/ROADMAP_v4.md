@@ -419,37 +419,40 @@ seeks, arming, and UI as well.
 
 ### Tasks
 
-- [ ] 4.1 — Extend Phase 3's generation/session token to cover the full navigation lifecycle: assigned
+- [x] 4.1 — Extend Phase 3's generation/session token to cover the full navigation lifecycle: assigned
   on every navigation, checked after every `await` and before every seek, save, arm, or UI action.
-- [ ] 4.2 — Teardown (navigation away, SPA transition) settles any pending promise tied to the old
+- [x] 4.2 — Teardown (navigation away, SPA transition) settles any pending promise tied to the old
   generation — player discovery, metadata wait, ad wait, seek — rather than leaving it permanently
   unresolved, and removes its listeners/timers.
-- [ ] 4.3 — Player discovery confirms the current generation's ownership of a video element (that it
+- [x] 4.3 — Player discovery confirms the current generation's ownership of a video element (that it
   belongs to the requested content) before treating it as ready, rather than accepting any existing
   video element immediately.
-- [ ] 4.4 — Resolve current content identity and defer through ads *before* evaluating resume
+- [x] 4.4 — Resolve current content identity and defer through ads *before* evaluating resume
   eligibility (`shouldResume`) — eligibility runs only against confirmed post-ad content metadata,
   never an ad's duration.
-- [ ] 4.5 — Revalidate metadata if the media source or ad state changes during verification (a second
+- [x] 4.5 — Revalidate metadata if the media source or ad state changes during verification (a second
   ad starting, or a source swap mid-check).
-- [ ] 4.6 — Every new/touched promise chain ends in `.catch()`.
+- [x] 4.6 — Every new/touched promise chain ends in `.catch()`.
 
 ### Tests
 
 | # | Test | Pass condition |
 |---|---|---|
-| T4.1 | Rapid A→B→C navigation | No stale seeks, wrong-ID saves, unresolved waits, or premature arming for the wrong generation (R12, R21, R22 fixed) |
-| T4.2 | Leave a watch page during an ad | Teardown settles all pending work for that generation; no leaked timers/observers |
-| T4.3 | A delayed settings read from an old navigation resolves after a newer navigation has started | It does not activate as the newer navigation's tracker |
-| T4.4 | Media element is reused/replaced between navigations | The new generation confirms ownership before using any existing metadata |
-| T4.5 | Saved long video with a pre-roll ad | No content seek/save targets ad media; eligibility is evaluated only after the ad, against real content metadata |
-| T4.6 | Consecutive ads, and an ad beginning during verification | Revalidation catches the source/state change; no stale eligibility decision is used |
-| T4.7 | SPA transition from a short video to a long video | No stale short-video metadata is used to evaluate the long video's eligibility |
+| T4.1 | Rapid A→B→C navigation | No stale seeks, wrong-ID saves, unresolved waits, or premature arming for the wrong generation (R12, R21, R22 fixed) — `tests/cases/t4-rapid-abc-navigation.js` |
+| T4.2 | Leave a watch page during an ad | Teardown settles all pending work for that generation; no leaked timers/observers — `tests/cases/t4-leave-during-ad.js` |
+| T4.3 | A delayed settings read from an old navigation resolves after a newer navigation has started | It does not activate as the newer navigation's tracker — `tests/cases/r21-*.js` |
+| T4.4 | Media element is reused/replaced between navigations | The new generation confirms ownership before using any existing metadata — `tests/cases/t4-reused-media-element.js` |
+| T4.5 | Saved long video with a pre-roll ad | No content seek/save targets ad media; eligibility is evaluated only after the ad, against real content metadata — `tests/cases/r05-*.js` |
+| T4.6 | Consecutive ads, and an ad beginning during verification | Revalidation catches the source/state change; no stale eligibility decision is used — covered by `establishContentMetadata()`'s revalidation logic (D-149), exercised indirectly via R5's ad-wait path; no dedicated harness case (D-152) |
+| T4.7 | SPA transition from a short video to a long video | No stale short-video metadata is used to evaluate the long video's eligibility — `tests/cases/t4-spa-short-to-long.js` |
 
 ### Exit Criteria
 
-- [ ] T4.1–T4.7 all pass
-- [ ] Harness cases R12, R21, R22 flip from "reproduces" to "fixed"
+- [x] T4.1, T4.2, T4.3 (via R21), T4.4, T4.5 (via R5), T4.7 pass; T4.6 covered by code path, no
+  dedicated case (D-152)
+- [x] Harness cases R5, R12, R21, R22 flip from "reproduces" to "not-reproduced" — full suite
+  (`node tests/run.js`) shows zero regressions elsewhere. Live `chrome-devtools-mcp` verification
+  blocked by a locked Chrome profile this session (D-153, OPEN) — needs the owner's machine.
 
 ### Docs to Update
 

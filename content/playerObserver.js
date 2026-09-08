@@ -13,13 +13,19 @@
 const playerObserver = (() => {
   let observer = null;
   let timeoutHandle = null;
+  // R12/F03 — the reject() of whatever waitForVideo() call is currently
+  // pending. disconnect() must settle it (never leave it hanging forever)
+  // since only one call is ever in flight at a time (bootstrap.js always
+  // disconnects the previous generation before starting a new wait).
+  let pendingReject = null;
 
   /**
    * Returns a Promise that resolves with the <video> element inside
    * #movie_player. Observes document.body until #movie_player itself
    * appears (v1.0 rejected immediately in this case, guaranteeing a missed
    * resume on slow cold loads — D-023), then resolves once <video> shows up
-   * inside it. Rejects only on the overall 10-second timeout.
+   * inside it. Rejects on the overall 10-second timeout, or immediately if
+   * disconnect() is called while this is still pending (R12).
    */
   function waitForVideo() {
     const startTime = Date.now();
@@ -28,6 +34,8 @@ const playerObserver = (() => {
     });
 
     return new Promise((resolve, reject) => {
+      pendingReject = reject;
+
       const resolveVideo = () => {
         const container = document.querySelector('#movie_player');
         return container ? container.querySelector('video') : null;
@@ -35,6 +43,7 @@ const playerObserver = (() => {
 
       const existing = resolveVideo();
       if (existing) {
+        pendingReject = null;
         debugLogger.log('waitForVideo:resolved', {
           path: 'immediate',
           elapsedMs: Date.now() - startTime,
@@ -52,6 +61,7 @@ const playerObserver = (() => {
           observer = null;
           clearTimeout(timeoutHandle);
           timeoutHandle = null;
+          pendingReject = null;
           debugLogger.log('waitForVideo:resolved', {
             path: 'observer',
             elapsedMs: Date.now() - startTime,
@@ -69,6 +79,7 @@ const playerObserver = (() => {
           observer = null;
         }
         timeoutHandle = null;
+        pendingReject = null;
         debugLogger.log('waitForVideo:resolved', {
           path: 'timeout',
           elapsedMs: Date.now() - startTime,
@@ -91,8 +102,10 @@ const playerObserver = (() => {
   }
 
   /**
-   * Disconnects the MutationObserver and cancels the timeout.
-   * Idempotent — safe to call even if already disconnected
+   * Disconnects the MutationObserver and cancels the timeout. Also settles
+   * (rejects) any pending waitForVideo() promise instead of leaving it
+   * unresolved forever (R12 — the audit found a 20s-later still-unsettled
+   * promise here). Idempotent — safe to call even if already disconnected
    * or before waitForVideo() has been called.
    */
   function disconnect() {
@@ -103,6 +116,11 @@ const playerObserver = (() => {
     if (timeoutHandle !== null) {
       clearTimeout(timeoutHandle);
       timeoutHandle = null;
+    }
+    if (pendingReject) {
+      const reject = pendingReject;
+      pendingReject = null;
+      reject(new Error('Cancelled: playerObserver disconnected'));
     }
   }
 
