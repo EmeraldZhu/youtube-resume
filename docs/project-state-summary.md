@@ -48,8 +48,11 @@ A phase is `DONE` only when the owner confirms it. Claude Code never writes `DON
 Phase 2 AWAITING VERIFICATION: new `background/storageWriter.js` (MV3 service worker, sole
 `chrome.storage.local` writer) and `storage/storageValidation.js` (shared validation/repair logic);
 `storageManager.js`'s public API unchanged. Self-verified via `node tests/run.js`: R13/R14/R19 flip
-to fixed, 4 new Phase-2 cases pass, 31/31 clean. Decisions D-132–D-137. No DOM changed, so no
-owner-facing visual check — owner confirmation moves it to DONE whenever convenient. Begin Phase 3
+to fixed, 4 new Phase-2 cases pass, 31/31 clean. Also self-verified live via `chrome-devtools-mcp`
+(owner-approved, D-051 technique): Load-Unpacked install raised no manifest warnings, the service
+worker registered with a clean console, and a real save→pin→delete round-trip through it from the
+popup context succeeded with no errors. Decisions D-132–D-137. No remaining check needs the owner's
+own eyes for this phase — their confirmation moves it to DONE whenever convenient. Begin Phase 3
 (Write Ownership, Freshness & Durable Saves) next via `docs/PHASE_PROMPTS_v4.md` after `/clear`.
 Nothing blocking — see `docs/DECISIONS.md` "Currently blocking" for the one open item (D-034).
 
