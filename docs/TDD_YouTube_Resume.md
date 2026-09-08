@@ -885,14 +885,38 @@ type StorageRoot = {
   [videoId: string]: VideoProgress;
 };
 
+type QuarantineEntry = {
+  entry: unknown;                  // the raw, unsanitized stored value
+  reason: 'unresolved-key' | 'malformed-value';
+  quarantinedAt: number;           // Unix timestamp, seconds
+};
+
+type RepairLogEntry = {
+  rawKey: string; canonicalId: string;
+  before: { existing: VideoProgress; incoming: VideoProgress };
+  after: VideoProgress; at: number;
+};
+
+type Quarantine = {                // v4 Phase 1, D-127 — root key youtubeResumeQuarantine
+  entries: Record<string, QuarantineEntry>;
+  repairLog: RepairLogEntry[];     // bounded to MAX_REPAIR_LOG, newest first
+};
+
 const STORAGE_KEY = 'youtubeResume';
 const SCHEMA_KEY = 'youtubeResumeSchema';        // v2 — root key, integer, now 3 (Phase 4)
 const SETTINGS_KEY = 'youtubeResumeSettings';    // v2 — root key
+const QUARANTINE_KEY = 'youtubeResumeQuarantine'; // v4 (Phase 1, D-127) — root key
 const MAX_ENTRIES = 200;
 const MAX_TITLE_LENGTH = 200;                    // v2
 const MAX_PINNED = 20;                           // v3 (Phase 4, D-067) — refused past this, never auto-unpinned
-const CURRENT_SCHEMA_VERSION = 3;                // v3 (Phase 4, D-071) — bumped exclusively here
+const MAX_REPAIR_LOG = 20;                       // v4 (Phase 1, 1.4) — bounded local retention, not a permanent audit log
+const CURRENT_SCHEMA_VERSION = 3;                // v3 (Phase 4, D-071) — bumped exclusively here; unchanged this phase
 ```
+
+`youtubeResumeQuarantine` is a fourth, additive root key (v4 Phase 1, D-127) — never nested inside
+`youtubeResume` (its keys aren't progress entries and must never be counted for the `MAX_ENTRIES`
+eviction cap), never read by any resume/tracking/popup code path, and never auto-emptied by this
+phase's logic.
 
 `youtubeResumeSchema` and `youtubeResumeSettings` are separate root keys, never nested inside
 `youtubeResume` — that object's keys are counted for the `MAX_ENTRIES` eviction cap, so a stray
@@ -920,22 +944,32 @@ page"`) instead of letting `chrome.storage.local` being `undefined` surface as a
 Omitted from the pseudocode blocks below for brevity — behavior is otherwise identical, callers
 still just see a rejected promise, caught the same way as any other storage failure (§7.2).
 
-**`getProgress(videoId)`:**
+**`getProgress(videoId)` / `getAllProgress()` (v4 Phase 1, 1.6 — boundary validation on read):**
+
+Both sanitize every row before returning it via `sanitizeEntry()`: `time` finite and ≥0 (else 0),
+`duration` finite and >0 (else 0), `updated` finite, ≥0, and not more than a day beyond "now" (else
+0), `title`/`channel` only kept if string-typed (trimmed, capped at `MAX_TITLE_LENGTH`), `pinned` only
+kept if literally `true`. A row whose *value* isn't a plain object (`null`, an array, a primitive —
+R17-class) is excluded from the result entirely rather than thrown on. This is independent, read-side
+defense — it must hold even before `repairDuplicates()` (below) has had a chance to run this load, and
+it never writes anything back to storage; a malformed row is not deleted by these calls, only omitted
+from what they return.
 
 ```javascript
 async function getProgress(videoId) {
   const result = await chrome.storage.local.get(STORAGE_KEY);
-  const store = result[STORAGE_KEY] ?? {};
-  return store[videoId] ?? null;
+  const raw = (result[STORAGE_KEY] ?? {})[videoId];
+  return isPlainObject(raw) ? sanitizeEntry(raw) : null;
 }
-```
 
-**`getAllProgress()`:**
-
-```javascript
 async function getAllProgress() {
   const result = await chrome.storage.local.get(STORAGE_KEY);
-  return result[STORAGE_KEY] ?? {};
+  const store = result[STORAGE_KEY] ?? {};
+  const sanitized = {};
+  for (const [key, entry] of Object.entries(store)) {
+    if (isPlainObject(entry)) sanitized[key] = sanitizeEntry(entry);
+  }
+  return sanitized;
 }
 ```
 
@@ -955,11 +989,17 @@ async function saveProgress(videoId, time, duration, title, channel) {
 
   const result = await chrome.storage.local.get(STORAGE_KEY);
   const store = result[STORAGE_KEY] ?? {};
-  const existing = store[videoId];
+  const existingRaw = store[videoId];
+  const existing = isPlainObject(existingRaw) ? existingRaw : null; // R17-class guard
 
+  // Boundary validation on write (v4 Phase 1, 1.6): a finite non-negative
+  // time and a positive duration, else 0 — never writes NaN/negative
+  // garbage that would corrupt downstream percent/duration math.
+  const safeTime = Number.isFinite(time) ? time : 0;
+  const safeDuration = Number.isFinite(duration) ? duration : 0;
   const entry = {
-    time,
-    duration,
+    time: safeTime >= 0 ? safeTime : 0,
+    duration: safeDuration > 0 ? safeDuration : 0,
     updated: Math.floor(Date.now() / 1000),
   };
 
@@ -993,17 +1033,29 @@ async function saveProgress(videoId, time, duration, title, channel) {
   if (existing?.pinned) entry.pinned = true;
   store[videoId] = entry;
 
-  // Eviction (v3 Phase 4, D-067): trim to MAX_ENTRIES, counting and
-  // selecting from unpinned entries only — a pinned entry never counts
-  // toward the cap and is never a candidate for removal by it.
-  const unpinnedKeys = Object.keys(store).filter(k => !store[k].pinned);
-  if (unpinnedKeys.length > MAX_ENTRIES) {
-    const sorted = unpinnedKeys.sort((a, b) => store[a].updated - store[b].updated);
-    const toRemove = sorted.slice(0, unpinnedKeys.length - MAX_ENTRIES);
-    toRemove.forEach(k => delete store[k]);
-  }
+  // Eviction (v3 Phase 4, D-067) via the shared enforceUnpinnedCap() helper
+  // (v4 Phase 1, 1.8) — see below. Counts/selects from unpinned, plain-object
+  // entries only; a pinned entry never counts toward the cap.
+  enforceUnpinnedCap(store);
 
   await chrome.storage.local.set({ [STORAGE_KEY]: store });
+}
+```
+
+**`enforceUnpinnedCap(store)` (v4 Phase 1, 1.8 — shared cap-enforcement helper):**
+
+Mutates `store` in place, evicting the oldest-by-`updated` unpinned entries down to `MAX_ENTRIES`.
+Called by `saveProgress` (above), `unpinProgress` (below), and `repairStore` (below) — every operation
+that can change eligibility, not only `saveProgress` — so the 200-unpinned invariant holds immediately
+after each one, not deferred to the next save.
+
+```javascript
+function enforceUnpinnedCap(store) {
+  const unpinnedKeys = Object.keys(store).filter(k => isPlainObject(store[k]) && !store[k].pinned);
+  if (unpinnedKeys.length <= MAX_ENTRIES) return false;
+  const sorted = unpinnedKeys.sort((a, b) => (store[a].updated ?? 0) - (store[b].updated ?? 0));
+  sorted.slice(0, unpinnedKeys.length - MAX_ENTRIES).forEach(k => delete store[k]);
+  return true;
 }
 ```
 
@@ -1030,9 +1082,11 @@ async function unpinProgress(videoId) {
   const result = await chrome.storage.local.get(STORAGE_KEY);
   const store = result[STORAGE_KEY] ?? {};
   const entry = store[videoId];
-  if (!entry || !entry.pinned) return; // no-op if absent or already unpinned
+  if (!isPlainObject(entry) || !entry.pinned) return; // no-op if absent or already unpinned
 
-  store[videoId] = { ...entry, pinned: false };
+  const { pinned, ...rest } = entry; // pinned key is only ever present when true
+  store[videoId] = rest;
+  enforceUnpinnedCap(store); // v4 Phase 1, 1.9/D-112 — see below
   await chrome.storage.local.set({ [STORAGE_KEY]: store });
 }
 ```
@@ -1040,6 +1094,11 @@ async function unpinProgress(videoId) {
 A pin attempt past the 20-pin cap is refused outright — the promise rejects, logged the same way as
 any other storage rejection (§7.2), and no existing pin is ever auto-unpinned to make room (D-067).
 Unpinning is never a rejection case: absent or already-unpinned both no-op.
+
+**Unpin-into-full-library policy (v4 Phase 1, 1.9/D-112):** unpinning while the library already has
+`MAX_ENTRIES` (200) unpinned entries immediately evicts the oldest eligible unpinned entry via
+`enforceUnpinnedCap()`, consistent with `saveProgress`'s existing eviction rule — the 200-unpinned
+invariant is never left exceeded until the next save happens to occur (closes R20/F13).
 
 **`deleteProgress(videoId)`:**
 
@@ -1102,42 +1161,102 @@ async function migrate() {
 A migration failure logs a warning and the extension continues with in-memory defaults — it never
 blocks resume or tracking. Never rewrites, reorders, or deletes an existing `youtubeResume` entry.
 
-#### Duplicate repair pass (Roadmap v3 Phase 2.2)
+#### `resolveVideoId(key)` (v4 Phase 1, 1.1 — hardened)
 
-Runs once per load, chained after `migrate()` resolves (`migrate().then(repairDuplicates)`): scans
-`youtubeResume` for keys that don't look like a bare 11-char video ID and merges any duplicates found
-for the same underlying video ID. Purely defensive — Phase 0 found no evidence any malformed key has
-ever been produced by shipped code (see Roadmap v3 "Phase 0 Findings"), but the pass is cheap enough to
-run unconditionally and closes the failure class regardless.
-
-- A key already shaped like a video ID is its own canonical ID.
-- A malformed key with exactly one embedded 11-char ID-shaped substring resolves to that ID; a key
-  with zero or more-than-one candidate is left in place, unresolved and untouched — 2.5's
-  non-destructive rule forbids deleting *any* entry, resolved or not, so an ambiguous key is never
-  guessed at or dropped.
-- When two entries resolve to the same canonical ID, they're merged: the **furthest** `time` wins
-  (paired with its own `duration`), the **most recently `updated`** entry's `title`/`channel` win,
-  falling back to the other entry's value if the more recent one is blank (same preserve-if-omitted
-  spirit as `saveProgress`, including the whitespace-only guard below).
-- The repaired store is written back only if something actually changed — no-op, no write, if the
-  store has no malformed/duplicate keys (T2.7).
+Returns a canonical video ID only when it's **proven** by exact parsing, never guessed: the trimmed
+key itself if it already matches the 11-char ID shape, or the `v=`/path segment of one of two
+explicitly supported URL forms (`youtube.com/watch?v=...`, `youtu.be/...`). Everything else — most
+importantly a malformed token like a 12+ character key — returns `null`. Earlier (v3 Phase 2) this
+function had a substring-match fallback that could rewrite a malformed key to a *different*,
+unproven 11-char identity (F11/R16); that fallback is removed outright, not merely narrowed — a key
+`resolveVideoId` can't prove is quarantined by the caller (below), never rewritten to a guess.
 
 ```javascript
-function repairStore(store) {
-  const merged = {};
-  let changed = false;
-  for (const [key, entry] of Object.entries(store)) {
-    if (!entry || typeof entry !== 'object') continue;
-    const canonicalId = resolveVideoId(key); // null if unresolved
-    if (!canonicalId) { merged[key] = entry; continue; }
-    if (canonicalId !== key) changed = true;
-    const existing = merged[canonicalId];
-    merged[canonicalId] = existing ? mergeEntryPair(existing, entry) : entry;
-    if (existing) changed = true;
-  }
-  return { store: merged, changed };
+function resolveVideoId(key) {
+  if (typeof key !== 'string') return null;
+  const trimmed = key.trim();
+  if (VIDEO_ID_PATTERN.test(trimmed)) return trimmed;
+  const watchMatch = trimmed.match(WATCH_URL_PATTERN);
+  if (watchMatch) return watchMatch[1];
+  const shortMatch = trimmed.match(SHORT_URL_PATTERN);
+  return shortMatch ? shortMatch[1] : null;
 }
 ```
+
+#### Duplicate repair pass & quarantine (Roadmap v3 Phase 2.2, hardened v4 Phase 1)
+
+Runs once per load, chained after `migrate()` resolves (`migrate().then(repairDuplicates)`): scans
+`youtubeResume` for keys that don't resolve to a proven video ID and for rows whose *value* isn't a
+usable object, merges duplicate rows for the same resolved video ID, and re-enforces the 200-unpinned
+cap. Non-destructive by construction — nothing this pass touches is ever deleted outright; a row it
+can't safely fold into `youtubeResume` is moved to `youtubeResumeQuarantine` (v4 Phase 1, D-127), a
+fourth, additive root key, instead of being dropped or left mixed into `youtubeResume` under its
+original (possibly malformed) key.
+
+- A key already shaped like a video ID, or resolvable via an explicitly supported URL form
+  (`resolveVideoId`, above), is folded in under its canonical ID.
+- A key `resolveVideoId` cannot prove an identity for, or a row whose value isn't a plain object
+  (`null`, an array — R17-class), is quarantined: `youtubeResumeQuarantine.entries[rawKey] = { entry,
+  reason: 'unresolved-key' | 'malformed-value', quarantinedAt }`. Quarantined data is never
+  auto-deleted by this pass, and no code path (resume/tracking/popup) reads from quarantine — it
+  exists purely so nothing is silently gone (1.2).
+- When two entries resolve to the same canonical ID, they're merged via `mergeEntryPair` (below) and
+  the merge is recorded in a bounded (`MAX_REPAIR_LOG` = 20 entries) `repairLog` array under the same
+  quarantine root key, newest first — a reversible pre-repair snapshot (1.4), not a permanent audit
+  log, so the pre-merge values stay inspectable without a second storage key.
+- `enforceUnpinnedCap()` runs on the repaired result before it's returned (1.8) — repair itself can in
+  principle change unpinned eligibility (a merge collapses two rows into one, changing counts).
+- The store and the quarantine key are written back independently, each only if it actually changed —
+  a load with nothing to repair performs no write at all.
+
+```javascript
+function repairStore(store, existingQuarantine, nowSeconds) {
+  const merged = {};
+  const quarantineEntries = { ...(existingQuarantine?.entries ?? {}) };
+  const repairLog = [...(existingQuarantine?.repairLog ?? [])];
+  let storeChanged = false, quarantineChanged = false;
+
+  function quarantine(key, entry, reason) {
+    if (!quarantineEntries[key]) {
+      quarantineEntries[key] = { entry, reason, quarantinedAt: nowSeconds };
+      quarantineChanged = true;
+    }
+    storeChanged = true; // the row leaves youtubeResume either way
+  }
+
+  for (const [key, entry] of Object.entries(store)) {
+    if (!isPlainObject(entry)) { quarantine(key, entry, 'malformed-value'); continue; }
+    const canonicalId = resolveVideoId(key);
+    if (!canonicalId) { quarantine(key, entry, 'unresolved-key'); continue; }
+    if (canonicalId !== key) storeChanged = true;
+
+    const existing = merged[canonicalId];
+    if (!existing) { merged[canonicalId] = entry; continue; }
+    const mergedEntry = mergeEntryPair(existing, entry);
+    repairLog.unshift({ rawKey: key, canonicalId, before: { existing, incoming: entry }, after: mergedEntry, at: nowSeconds });
+    if (repairLog.length > MAX_REPAIR_LOG) repairLog.length = MAX_REPAIR_LOG;
+    merged[canonicalId] = mergedEntry;
+    storeChanged = true;
+  }
+
+  if (enforceUnpinnedCap(merged)) storeChanged = true;
+  return { store: merged, quarantine: { entries: quarantineEntries, repairLog }, storeChanged, quarantineChanged };
+}
+```
+
+**`mergeEntryPair(a, b)`:** the **furthest** `time` wins (paired with its own `duration`), the **most
+recently `updated`** entry's `title`/`channel` win (falling back to the other entry's value if blank —
+same preserve-if-omitted spirit as `saveProgress`, whitespace-only guard included), and `pinned` uses
+**OR** semantics — if either side is pinned, the merged entry stays pinned (v4 Phase 1, 1.3 — closes
+F11/R15, where the prior version only ever copied `pinned` from whichever entry happened to be
+"recent"). Any other, unnamed field survives via an object-spread base so a future additive field
+isn't silently dropped by a merge it doesn't know about.
+
+**Known limitation, documented not resolved (v4 Phase 1, 1.5):** furthest-time-wins can revive an old
+position — if the canonical entry was deliberately rewound, an unmerged duplicate still sitting at the
+old, further-along position wins the comparison and undoes the rewind. Fixing this needs the
+session/revision evidence Phase 3 introduces (distinguishing a deliberate seek from simple staleness);
+not available at this layer.
 
 #### Error Behavior
 - All methods are `async` and will reject if `chrome.storage.local` is unavailable
@@ -1149,16 +1268,39 @@ function repairStore(store) {
   `unpinProgress` never rejects: absent or already-unpinned are both a silent no-op
 - `migrate()` and `repairDuplicates()` are the exceptions: both catch and log internally, since they
   run unsupervised at load time and must never block resume or tracking
-- `getProgress` returns `null` for any missing key — never throws on absence
+- `getProgress` returns `null` for any missing key or malformed row — never throws on absence or on a
+  `null`/non-object stored value (v4 Phase 1, R17-class)
 
-#### Settings API (v2 — Phase 6)
+#### Settings API (v2 — Phase 6; per-field validation added v4 Phase 1, 1.6)
+
+`getSettings()` validates each field individually against an allowed-preset set (or, for the three
+boolean settings, an actual-`boolean`-type check) rather than merging the stored object over the
+defaults wholesale — a stored value outside its allowed set (a string where a number preset is
+expected, `"false"` where a boolean is expected, an out-of-range number, the whole stored value being
+an array) falls back to that one field's default without invalidating the other, still-valid fields
+(closes R18/F12).
 
 ```javascript
+const ALLOWED_MIN_WATCH_SECONDS = [10, 30, 60, 120];
+const ALLOWED_COMPLETION_THRESHOLD = [0.9, 0.95, 0.98, 1]; // `1` is Phase 7's future "Only at the end" sentinel (D-106)
+const ALLOWED_REWIND_SECONDS = [0, 2, 5, 10];
+const BOOLEAN_SETTING_KEYS = ['showToast', 'showRestartButton', 'loadThumbnails'];
+
+function sanitizeSettingsValue(raw) {
+  const valid = isPlainObject(raw) ? raw : {};
+  const out = { ...DEFAULT_SETTINGS };
+  if (ALLOWED_MIN_WATCH_SECONDS.includes(valid.minWatchSeconds)) out.minWatchSeconds = valid.minWatchSeconds;
+  if (ALLOWED_COMPLETION_THRESHOLD.includes(valid.completionThreshold)) out.completionThreshold = valid.completionThreshold;
+  if (ALLOWED_REWIND_SECONDS.includes(valid.rewindSeconds)) out.rewindSeconds = valid.rewindSeconds;
+  for (const key of BOOLEAN_SETTING_KEYS) {
+    if (typeof valid[key] === 'boolean') out[key] = valid[key];
+  }
+  return out;
+}
+
 async function getSettings() {
   const result = await chrome.storage.local.get(SETTINGS_KEY);
-  const stored = result[SETTINGS_KEY];
-  const valid = stored && typeof stored === 'object' ? stored : {};
-  return { ...DEFAULT_SETTINGS, ...valid };
+  return sanitizeSettingsValue(result[SETTINGS_KEY]);
 }
 
 async function saveSettings(partial) {
@@ -1535,6 +1677,42 @@ count decrement — no full re-render, no re-read from storage (T8.9).
 
 **Empty state:** `#empty-state` and `#video-list` are toggled via the same `.hidden` class used for
 view switching; `updateCount(0)` is the single place that decides which is shown.
+
+**Independent progress/settings reads and the load-failure state (v4 Phase 1, 1.7/D-121):**
+`getAllProgress()` and `getSettings()` are no longer awaited together in one `Promise.all` — a
+settings-read failure must never hide a valid library (CLAUDE.md's graceful-degradation principle:
+"if resume fails, tracking still runs" applied to the popup). The progress read runs first, alone,
+in its own `try`/`catch`:
+
+```javascript
+let store = null;
+try {
+  store = await storageManager.getAllProgress();
+} catch (err) {
+  console.warn('[YTResume] Failed to read saved videos:', err);
+}
+
+if (store) {
+  let settings;
+  try {
+    settings = await storageManager.getSettings();
+  } catch (err) {
+    settings = storageManager.getDefaultSettings(); // never blocks the list on a settings failure
+  }
+  // ...build rows from store using settings, updateCount(entries.length)
+} else {
+  // #load-failure-state (CP-75/CP-76) — never #empty-state (CP-32/33)
+}
+```
+
+If `getAllProgress()` itself rejects, `#load-failure-state` (new element, same layout position as
+`#empty-state`, UX Spec §6.3) renders instead — CP-75 (`Couldn't load saved videos`) / CP-76
+(`Something went wrong reading your saved videos. Try reopening the popup.`). This is a *distinct*
+state from `#empty-state`, never conflated with it — `#empty-state`'s CP-32 (`No saved videos yet`)
+asserts the library is genuinely empty, which is a specific, false claim when the real problem is that
+the read failed. `getSettings()` failing alone never triggers this state; the list still renders
+normally against `storageManager.getDefaultSettings()`. No retry button, no auto-retry — reopening the
+popup is the existing, sufficient recovery path.
 
 **Render budget (T8.2):** 200 entries render in ~25ms measured via `chrome-devtools-mcp` (D-051/D-052)
 — comfortably under the 200ms budget (Roadmap 8.10) — because the list is built once from an

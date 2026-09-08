@@ -679,8 +679,9 @@ youtube-resume/
 | `youtubeResume` | Map of `videoId → VideoProgress` | v1.0 |
 | `youtubeResumeSettings` | User preferences | v2.0 |
 | `youtubeResumeSchema` | Integer schema version | v2.0 |
+| `youtubeResumeQuarantine` | Data the boundary-repair pass could not safely resolve into `youtubeResume` (§7.3), plus a bounded log of recent repair merges | v4.0 (Phase 1) |
 
-> Schema version and settings are **separate root keys**, never nested inside `youtubeResume`. That object's keys are counted for the 200-entry cap and iterated during eviction; any non-videoId key inside it would corrupt both.
+> Schema version, settings, and quarantine are **separate root keys**, never nested inside `youtubeResume`. That object's keys are counted for the 200-entry cap and iterated during eviction; any non-videoId key inside it would corrupt both. `youtubeResumeQuarantine` is never read by any resume/tracking/popup code path and is never auto-emptied.
 
 ### 7.3 Data Schema — v4
 
@@ -748,6 +749,10 @@ entry has.
 
 **Channel capture:** read from a DOM selector scoped to the primary watch-page metadata box (there is no `document.title` equivalent for channel name). A missing channel must never block a save, and existing entries are never backfilled — the panel simply omits the channel line until the video is watched again.
 
+**Boundary validation (v4.0, Phase 1):** every field is validated where it enters or leaves storage, with a per-field default on failure rather than a whole-entry rejection — a bad `time`/`duration`/`updated` value never blocks the other valid fields on the same row, and a bad row never blocks an unrelated write. `time` must be finite and non-negative (else 0), `duration` finite and positive (else 0), `updated` finite, non-negative, and not implausibly far in the future (else 0). `title`/`channel` are kept only if string-typed. A stored row whose *value* isn't a usable object (`null`, an array, a primitive) is excluded from what reads return, and is quarantined (§7.2) rather than silently dropped, the next time the boundary-repair pass runs. Settings are validated the same way, field by field, against each setting's allowed presets (§5.8) rather than merged over the defaults wholesale — a wrong-typed or out-of-range stored value for one setting falls back to that setting's own default without touching the others.
+
+**Boundary repair (v4.0, Phase 1):** the identity-resolution step that folds a stored key into its canonical video ID (§7.6-adjacent, `resolveVideoId`) only ever accepts an identity **proven** by exact parsing — the key itself (surrounding whitespace tolerated) or one of a small set of explicitly supported URL forms. It never guesses at a malformed key (e.g. a 12+ character token) by pattern-matching a substring out of it — doing so risks reassigning that data to a different, unproven video ID. A key it cannot resolve, or a row whose value isn't usable, is moved to `youtubeResumeQuarantine` (§7.2) instead of being merged into a guess or dropped; nothing quarantined is ever permanently deleted by this pass. When two rows do resolve to the same video ID, the merge preserves `pinned` from either side (a pinned duplicate never loses its pin) and any other compatible field, and the merge itself is recorded in a small bounded log alongside the quarantine key so the pre-merge values stay inspectable.
+
 ### 7.4 Storage Lifecycle
 
 | Operation | Trigger | Action |
@@ -766,6 +771,7 @@ entry has.
 - Eviction must never remove the entry just written
 - Eviction counts only entries inside `youtubeResume`; other root keys are out of scope
 - **v3.0:** pinned entries (`pinned: true`, §5.11) are excluded entirely from the 200-entry count and from eviction candidacy — the cap of 200 applies to unpinned entries only. A separate hard cap of 20 pinned entries applies to pinning itself, enforced at pin time rather than by eviction.
+- **v4.0 (Phase 1):** the 200-unpinned cap is enforced immediately after *every* operation that can change which entries are eligible for it — a save, an unpin, and the boundary-repair pass's merges — not only inside the write path. Unpinning an entry while the library already holds 200 unpinned entries immediately evicts the oldest eligible unpinned entry (by `updated`), the same selection rule eviction already uses at save time; the count is never left at 201 pending some later save.
 
 ### 7.6 Schema Migration — v1 → v2 *(new)*
 

@@ -102,8 +102,10 @@ decision. It is the one place slowing down is correct — and only for the check
 - Exactly one `setInterval` and one `MutationObserver` alive at any time. Re-target, never duplicate.
 - Storage root keys: `youtubeResume` (200-entry cap on unpinned entries, oldest-first eviction by
   `updated`, plus up to 20 pinned entries exempt from that cap), `youtubeResumeSettings`,
-  `youtubeResumeSchema`. Settings and schema version must **never** nest inside `youtubeResume` —
-  its keys are counted for eviction.
+  `youtubeResumeSchema`, `youtubeResumeQuarantine` (v4 Phase 1, D-127 — data the boundary-repair pass
+  couldn't safely resolve; never read by resume/tracking/popup code, never auto-emptied). Settings,
+  schema version, and quarantine must **never** nest inside `youtubeResume` — its keys are counted
+  for eviction.
 - The 400ms resume delay is fixed and never user-configurable.
 - Every promise chain ends in `.catch()`. The extension must never break YouTube.
 - No UI during normal, uninterrupted playback.

@@ -241,6 +241,7 @@ function createDocument() {
     createElementNS: (_ns, tag) => new FakeElement(tag),
     querySelector: (sel) => html.querySelector(sel),
     querySelectorAll: (sel) => html.querySelectorAll(sel),
+    getElementById: (id) => html.querySelector(`#${id}`),
     _listeners: new Map(),
     addEventListener(type, fn) {
       if (!this._listeners.has(type)) this._listeners.set(type, new Set());

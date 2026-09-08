@@ -11,6 +11,12 @@
  * the expected outcome for an unfixed defect, not a failure of this script.
  * The runner only fails (non-zero exit) if a case throws instead of
  * returning a verdict, which is a harness/case bug, never silently skipped.
+ *
+ * File naming: `rNN-*.js` are the audit's original R1-R24 appendix cases
+ * (fixed set, never renumbered). `tN-*.js` (v4 Phase 1 onward) are cases a
+ * later phase adds for something the appendix never covered — phase-specific
+ * regressions, not audit findings — kept in the same runnable suite per each
+ * phase's "extend the harness with this phase's own cases" instruction.
  */
 
 const fs = require('fs');
@@ -21,7 +27,7 @@ const jsonMode = process.argv.includes('--json');
 
 async function main() {
   const files = fs.readdirSync(CASES_DIR)
-    .filter((f) => /^r\d{2}-.*\.js$/.test(f))
+    .filter((f) => /^(r\d{2}|t\d+)-.*\.js$/.test(f))
     .sort();
 
   const results = [];
@@ -52,9 +58,9 @@ async function main() {
       console.log(`    evidence: ${r.evidence}`);
       console.log('');
     }
-    const missing = 24 - results.length;
-    if (missing !== 0) {
-      console.log(`WARNING: expected 24 R1-R24 cases, found ${results.length}.`);
+    const rCaseCount = results.filter((r) => /^r\d{2}-/.test(r.file)).length;
+    if (rCaseCount !== 24) {
+      console.log(`WARNING: expected 24 R1-R24 cases, found ${rCaseCount}.`);
     }
   }
 

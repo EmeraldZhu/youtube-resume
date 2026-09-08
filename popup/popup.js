@@ -66,6 +66,7 @@ document.addEventListener('DOMContentLoaded', async () => {
   const countEl = document.getElementById('saved-count');
   const listEl = document.getElementById('video-list');
   const emptyStateEl = document.getElementById('empty-state');
+  const loadFailureEl = document.getElementById('load-failure-state');
   const confirmCountEl = document.getElementById('confirm-count');
   const confirmPinnedNoteEl = document.getElementById('confirm-pinned-note');
   const clearBtn = document.getElementById('clear-btn');
@@ -292,11 +293,27 @@ document.addEventListener('DOMContentLoaded', async () => {
     return li;
   }
 
+  // Progress and settings are read independently (v4 Phase 1, 1.7/D-121):
+  // a settings-read failure must never hide valid saved-video data — it
+  // falls back to safe defaults and the list still renders normally. Only
+  // a progress-read failure (or unrenderable progress data) produces the
+  // distinct load-failure state; it is never conflated with "genuinely
+  // empty" (CP-32/33 must not be shown when the read itself failed).
+  let store = null;
   try {
-    const [store, settings] = await Promise.all([
-      storageManager.getAllProgress(),
-      storageManager.getSettings(),
-    ]);
+    store = await storageManager.getAllProgress();
+  } catch (err) {
+    console.warn('[YTResume] Failed to read saved videos:', err);
+  }
+
+  if (store) {
+    let settings;
+    try {
+      settings = await storageManager.getSettings();
+    } catch (err) {
+      console.warn('[YTResume] Failed to read settings, using defaults:', err);
+      settings = storageManager.getDefaultSettings();
+    }
     loadThumbnails = settings.loadThumbnails;
 
     // Two-tier sort (UX Spec §6.3): pinned entries first, then unpinned;
@@ -310,9 +327,13 @@ document.addEventListener('DOMContentLoaded', async () => {
     });
     pinnedCount = entries.filter(([, entry]) => entry.pinned).length;
     updateCount(entries.length);
-  } catch (err) {
-    console.warn('[YTResume] Failed to read storage:', err);
-    updateCount(0);
+  } else {
+    // CP-75/CP-76 (UX Spec §6.3 Load-Failure State) — same layout position
+    // as the empty state, distinct copy, never the empty-state message.
+    listEl.classList.add('hidden');
+    emptyStateEl.classList.add('hidden');
+    loadFailureEl.classList.remove('hidden');
+    clearBtn.disabled = true;
   }
 
   // Clear saved progress (moved into settings view, D-014: youtubeResume only)
@@ -383,6 +404,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     renderSettings(settings);
   } catch (err) {
     console.warn('[YTResume] Failed to read settings:', err);
+    renderSettings(storageManager.getDefaultSettings());
   }
 
   segmentedGroups.forEach((group) => {
