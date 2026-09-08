@@ -57,9 +57,15 @@ new `video.seeking` guard rejects any mid-seek save. Save cadence keeps its 5-ti
 wall-clock OR-condition added only for a suspended/throttled tab (a full wall-clock replacement broke
 ~10 existing harness cases and was reverted). Checkpoint-loss budget documented in PRD §5.4.
 Self-verified via `node tests/run.js`: R6/R10/R11 flip to `not-reproduced` (R11 rewritten to assert
-recovery at the bootstrap level where the fix lives — D-173); 3 new T6 cases pass; zero regressions (49
-cases total). Decisions D-168–D-174. **Live verification not yet run this session** (frozen/discarded/
-back-forward-restored tabs, multi-tab matrix) — owner checks below. Nothing else blocking.
+recovery at the bootstrap level where the fix lives — D-173); 4 new T6 cases pass; zero regressions (50
+cases total). A live-verification pass (D-175) found `OUTCOME.PENDING` — a seek that never settled —
+was also meant to be Phase 6-recoverable (a Phase 5 test comment already promised this); fixed and
+covered by a new case. Decisions D-168–D-176. **Live verification (`chrome-devtools-mcp`) completed
+this session (D-176):** ordinary resume confirmed unaffected; the recovery-trigger wiring confirmed to
+actually re-fire on a real `visibilitychange` in real Chrome (a second live resume attempt observed).
+Full end-to-end recovery, a genuine bfcache restore, and real tab freeze/discard were not witnessed
+live — sandbox network/tooling limits, not code defects; see D-176 for exactly what did and didn't run.
+Nothing else blocking.
 
 ## Doc versions
 

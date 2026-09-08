@@ -21,19 +21,22 @@
   // genuinely already refreshed for the new content.
   let lastVideoElement = null;
   let lastVideoDuration = null;
-  // Phase 6 (6.1/6.2/F02/F09/R6/R11) — set only when a navigation's player
-  // discovery (playerObserver.waitForVideo()) times out entirely: nothing
-  // was ever set up for this videoId (progressTracker never started), so
-  // there is no tracker to protect or checkpoint to preserve — the whole
-  // pipeline just needs a fresh attempt. Cleared at the top of every
-  // onVideoChange() call and re-set only by that same failure path, so a
-  // session that ever gets further than player discovery (even one whose
-  // resume itself fails/defers) never sets this — resumeManager's own
-  // OUTCOME.DEFERRED (metadata-timeout) already self-heals via a
-  // 'loadedmetadata' listener, and bootstrap.js's existing
-  // protectCheckpoint()/arm() handling already covers every other
-  // non-established outcome. Recovery triggers (attemptRecovery) act on
-  // this only when the page is still on the same video they were set for.
+  // Phase 6 (6.1/6.2/F02/F09/R6/R11) — set when a navigation never reached
+  // an established outcome for a reason a later readiness event could
+  // plausibly fix: player discovery (playerObserver.waitForVideo()) timing
+  // out entirely (nothing was ever set up for this videoId — the whole
+  // pipeline just needs a fresh attempt), or a resume that reached the seek
+  // stage but never settled within the bounded verify window (OUTCOME.PENDING
+  // — e.g. buffering on a slow connection; the checkpoint is already
+  // protected, a full re-run just retries the seek against it). Cleared at
+  // the top of every onVideoChange() call and re-set only by those same
+  // paths, so a session that establishes (VERIFIED/user-directed) never sets
+  // this. OUTCOME.DEFERRED (a metadata-wait timeout) deliberately does NOT
+  // set this — it already self-heals internally via resumeManager's own
+  // 'loadedmetadata' listener, and layering a full pipeline re-run on top
+  // would risk a redundant duplicate attempt. Recovery triggers
+  // (attemptRecovery) act on this only when the page is still on the same
+  // video it was set for.
   let pendingRecoveryVideoId = null;
 
   /**
@@ -181,6 +184,17 @@
             progressTracker.markUserDirected();
           } else if (!established) {
             progressTracker.protectCheckpoint(saved.time);
+            // Phase 6 (6.2) — a seek that never settled within the bounded
+            // verify window (buffering, a slow connection) is exactly the
+            // kind of "pending... session" 6.2 means to stay eligible for a
+            // later readiness event, same as a player-discovery/metadata
+            // timeout. OUTCOME.DEFERRED is deliberately excluded here — it
+            // already self-heals internally via resumeManager's own
+            // 'loadedmetadata' listener, and re-running the whole pipeline
+            // on top of that would risk a redundant duplicate attempt.
+            if (result.status === resumeManager.OUTCOME.PENDING) {
+              pendingRecoveryVideoId = videoId;
+            }
           }
         }
       } catch(err) {
