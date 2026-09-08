@@ -16,7 +16,7 @@ Phases 4–9 are still planning only.
 | 0 | Reproduction & Harness Foundation | DONE | — |
 | 1 | Boundary Validation & Safe Repair | DONE | — |
 | 2 | Serialized Storage Writer | DONE | — |
-| 3 | Write Ownership, Freshness & Durable Saves | AWAITING VERIFICATION | — |
+| 3 | Write Ownership, Freshness & Durable Saves | DONE | — |
 | 4 | Resume Identity & Cancellation | NOT STARTED | — |
 | 5 | Verified Resume Outcomes | NOT STARTED | — |
 | 6 | Deferred Recovery Lifecycle | NOT STARTED | — |
@@ -46,18 +46,16 @@ A phase is `DONE` only when the owner confirms it. Claude Code never writes `DON
 
 ## Next action
 
-Phase 3 self-verified, AWAITING VERIFICATION (owner). Per-session write ownership/freshness added to
-`progressTracker.js` (session id, last-active tracking, committed/attempted/dirty position split) and
-`storageWriter.js` (stale-session rejection on `SAVE_PROGRESS`, using the existing `updated` field —
-no schema bump, D-139 reverses an earlier persisted-`revision`/`owner` plan; PRD corrected).
-`node tests/run.js`: R23/R24 fixed, 4 new T3.x cases pass, 35/35 clean; only Phase 4–6-scope findings
-still reproduce, as expected. Live-verified via `chrome-devtools-mcp` (D-145): stale-session rejection,
-explicit-seek override, delete-suppresses-recreation, and a full save→pin→unpin→delete→save→clear-all
-round trip all behave correctly against the real service worker; only network request seen was the
-expected thumbnail GET. **Gate A closed** (D-144). Decisions D-139–D-145. Begin Phase 4 (Resume
-Identity & Cancellation) next via `docs/PHASE_PROMPTS_v4.md` after `/clear`, once the owner confirms
-the live checks below. Nothing blocking — see `docs/DECISIONS.md` "Currently blocking" (D-034, open
-but non-blocking).
+Phase 3 DONE (owner-confirmed): per-session write ownership/freshness added to `progressTracker.js`
+(session id, last-active tracking, committed/attempted/dirty position split) and `storageWriter.js`
+(stale-session rejection on `SAVE_PROGRESS`, using the existing `updated` field — no schema bump,
+D-139 reverses an earlier persisted-`revision`/`owner` plan; PRD corrected). Self-verified via
+`node tests/run.js` (R23/R24 fixed, 4 new T3.x cases, 35/35 clean) and live via `chrome-devtools-mcp`
+(D-145): stale-session rejection, explicit-seek override, delete-suppresses-recreation, and a full
+save→pin→unpin→delete→save→clear-all round trip all correct against the real service worker.
+**Gate A closed** (D-144). Decisions D-139–D-145. Begin Phase 4 (Resume Identity & Cancellation) next
+via `docs/PHASE_PROMPTS_v4.md` after `/clear`. Nothing blocking — see `docs/DECISIONS.md` "Currently
+blocking" (D-034, open but non-blocking).
 
 ## Doc versions
 
