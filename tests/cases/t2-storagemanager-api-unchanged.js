@@ -4,14 +4,19 @@ const { loadExtension } = require('../lib/harness');
 
 /**
  * Phase 2 case (Roadmap v4 2.4/T2.7, D-102): storageManager.js's exported
- * function names and arity must be byte-identical to v3.0.0 — every
- * mutating function became a message client internally, but no caller
- * (content scripts, popup) should need any code change.
+ * function names must be unchanged from v3.0.0, and every function's arity
+ * must be unchanged EXCEPT saveProgress, which Phase 3 (Roadmap 3.1/3.3,
+ * D-141) extends with a 6th, optional `ownership` parameter carrying the
+ * calling session's write-ownership/freshness metadata — additive and
+ * backward compatible (every existing call site that omits it is
+ * unaffected; storageManager.js defaults each field via `?.`), so this
+ * case now asserts arity 6 for saveProgress specifically rather than
+ * flagging the intentional change as a regression.
  */
 const EXPECTED_API = {
   getProgress: 1,
   getAllProgress: 0,
-  saveProgress: 5,
+  saveProgress: 6,
   deleteProgress: 1,
   clearAllProgress: 0,
   pinProgress: 1,

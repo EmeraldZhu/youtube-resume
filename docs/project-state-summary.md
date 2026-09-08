@@ -7,16 +7,16 @@
 
 ## Phase Status — v4.0.0
 
-Roadmap v4 drafted from `docs/EXTENSION_AUDIT_2026-09-07.md` (21 findings, F01–F21). Phases 0–2 have
-shipped code (harness, storage boundary validation/repair, serialized writer); Phases 3–9 are still
-planning only.
+Roadmap v4 drafted from `docs/EXTENSION_AUDIT_2026-09-07.md` (21 findings, F01–F21). Phases 0–3 have
+shipped code (harness, boundary validation/repair, serialized writer, write ownership/freshness);
+Phases 4–9 are still planning only.
 
 | Phase | Name | Status | Blocked By |
 |---|---|---|---|
 | 0 | Reproduction & Harness Foundation | DONE | — |
 | 1 | Boundary Validation & Safe Repair | DONE | — |
 | 2 | Serialized Storage Writer | DONE | — |
-| 3 | Write Ownership, Freshness & Durable Saves | NOT STARTED | — |
+| 3 | Write Ownership, Freshness & Durable Saves | AWAITING VERIFICATION | — |
 | 4 | Resume Identity & Cancellation | NOT STARTED | — |
 | 5 | Verified Resume Outcomes | NOT STARTED | — |
 | 6 | Deferred Recovery Lifecycle | NOT STARTED | — |
@@ -24,10 +24,11 @@ planning only.
 | 8 | Popup Reconciliation & Accessibility | NOT STARTED | — |
 | 9 | Regression, Docs & Store Release | NOT STARTED | — |
 
-Ship gates: A after Phase 3 (storage correctness), B after Phase 6 (resume reliability), C after
-Phase 8 (product completeness). Phases 0–3 are independently releasable (Roadmap v4 §3). Key
-decisions logged D-100–D-137 — see `docs/DECISIONS.md` for the full ledger; notable: service-worker
-storage writer (D-102, built Phase 2 — D-132–D-136), new additive `youtubeResumeQuarantine` root key
+Ship gates: **A closed** after Phase 3 (storage correctness — D-144), B after Phase 6 (resume
+reliability), C after Phase 8 (product completeness). Phases 0–3 are independently releasable
+(Roadmap v4 §3). Key decisions logged D-100–D-144 — see `docs/DECISIONS.md` for the full ledger;
+notable: service-worker storage writer (D-102, Phase 2), write-ownership/freshness via the existing
+`updated` field, no schema change (D-139, Phase 3), new additive `youtubeResumeQuarantine` root key
 (D-127), committed `tests/` regression harness (D-108). UX Spec 4.0.0 copy IDs CP-68–CP-79 assigned
 (D-110); CP-80 is next free.
 
@@ -45,14 +46,18 @@ A phase is `DONE` only when the owner confirms it. Claude Code never writes `DON
 
 ## Next action
 
-Phase 2 DONE (owner-confirmed): new `background/storageWriter.js` (MV3 service worker, sole
-`chrome.storage.local` writer) and `storage/storageValidation.js` (shared validation/repair logic);
-`storageManager.js`'s public API unchanged. Self-verified via `node tests/run.js` (R13/R14/R19 fixed,
-4 new Phase-2 cases, 31/31 clean) and live via `chrome-devtools-mcp` (clean Load-Unpacked install, no
-manifest warnings, service worker registers cleanly, a real save→pin→delete round-trip through it
-succeeds). Decisions D-132–D-137. Begin Phase 3 (Write Ownership, Freshness & Durable Saves) next via
-`docs/PHASE_PROMPTS_v4.md` after `/clear`. Nothing blocking — see `docs/DECISIONS.md` "Currently
-blocking" for the one open item (D-034).
+Phase 3 self-verified, AWAITING VERIFICATION (owner). Per-session write ownership/freshness added to
+`progressTracker.js` (session id, last-active tracking, committed/attempted/dirty position split) and
+`storageWriter.js` (stale-session rejection on `SAVE_PROGRESS`, using the existing `updated` field —
+no schema bump, D-139 reverses an earlier persisted-`revision`/`owner` plan; PRD corrected).
+`node tests/run.js`: R23/R24 fixed, 4 new T3.x cases pass, 35/35 clean; only Phase 4–6-scope findings
+still reproduce, as expected. Live-verified via `chrome-devtools-mcp` (D-145): stale-session rejection,
+explicit-seek override, delete-suppresses-recreation, and a full save→pin→unpin→delete→save→clear-all
+round trip all behave correctly against the real service worker; only network request seen was the
+expected thumbnail GET. **Gate A closed** (D-144). Decisions D-139–D-145. Begin Phase 4 (Resume
+Identity & Cancellation) next via `docs/PHASE_PROMPTS_v4.md` after `/clear`, once the owner confirms
+the live checks below. Nothing blocking — see `docs/DECISIONS.md` "Currently blocking" (D-034, open
+but non-blocking).
 
 ## Doc versions
 

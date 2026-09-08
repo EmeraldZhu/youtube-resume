@@ -225,15 +225,36 @@ const storageManager = (() => {
    *   earlier save already exists (D-016).
    * @param {string} channel - Optional. Same preserve-if-omitted behaviour
    *   as title (D-016).
+   * @param {object} [ownership] - v4 Phase 3 write-ownership/freshness
+   *   metadata for the calling playback session (Roadmap 3.1-3.3):
+   *   { sessionId, lastActiveAt: ms epoch of this session's last
+   *   meaningfully-active moment, explicitUserSeek: boolean, trigger }.
+   *   The writer uses this to reject a save from a session that has been
+   *   inactive since before the entry's (or a deletion's) more recent
+   *   timestamp — closes F07/R23. Omitted entirely by a non-tracking
+   *   caller (there are none today; every saveProgress call comes from
+   *   progressTracker), in which case the writer applies no freshness
+   *   check.
    *
-   * Rejects if videoId isn't a plausible YouTube video ID shape — no entry
-   * is written. Callers already end this call in .catch() (progressTracker
-   * convention), so this surfaces as a logged, silently-handled rejection,
-   * never an uncaught error.
+   * Rejects if videoId isn't a plausible YouTube video ID shape, or if the
+   * writer's freshness check judges this session stale (Roadmap 3.3/3.4) —
+   * no entry is written either way. Callers already end this call in
+   * .catch() (progressTracker convention), so this surfaces as a logged,
+   * silently-handled rejection, never an uncaught error.
    */
-  async function saveProgress(videoId, time, duration, title, channel) {
+  async function saveProgress(videoId, time, duration, title, channel, ownership) {
     assertRuntimeAvailable();
-    const result = await sendCommand('SAVE_PROGRESS', { videoId, time, duration, title, channel });
+    const result = await sendCommand('SAVE_PROGRESS', {
+      videoId,
+      time,
+      duration,
+      title,
+      channel,
+      sessionId: ownership?.sessionId ?? null,
+      lastActiveAt: ownership?.lastActiveAt ?? null,
+      explicitUserSeek: !!ownership?.explicitUserSeek,
+      trigger: ownership?.trigger ?? null,
+    });
     // Phase 0 (v3) diagnostic — defects A/B (Roadmap v3 0.2). No-ops when DEBUG is false.
     debugLogger.log('saveProgress', {
       videoId,

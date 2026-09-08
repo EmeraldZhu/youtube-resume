@@ -51,7 +51,7 @@
 | C19 | "Treat as finished at" gains a fourth option, "Only at the end" | §5.8, §5.10 |
 | C20 | Explicit timestamp links take precedence over saved progress | §5.13 (new) |
 | C21 | Storage writes are serialized so concurrent tabs cannot lose entries | §5.10, §6.1, §6.3 |
-| C22 | Storage schema advances to v4 (adds optional `ended`, `revision`, `owner`) | §7.3 |
+| C22 | Storage schema advances to v4 (adds optional `ended`) — Phase 3's write-ownership/freshness mechanism (§5.10) does not need or add its own persisted schema fields; see §7.3's note | §7.3 |
 | C23 | §6.1 project structure and §6.3 manifest snippet corrected to include `background/storageWriter.js` and the `background.service_worker` manifest key; adds no permission and no network capability | §6.1, §6.3, §10.3 |
 | C24 | Non-Goals reaffirmed for v4.0 — no change to which items are in or out of scope; the background service worker is an architecture change, not a scope change | §3.2 |
 
@@ -503,6 +503,18 @@ from multiple open YouTube tabs are never lost to each other. Two tabs saving pr
 time each end up reflected in storage — neither write silently disappears because the other happened
 first, last, or concurrently.
 
+**Write ownership and freshness *(new in v4.0, Phase 3)*:** When the same video is open in more than
+one tab, a tab that has merely gone idle or lost focus does not get to overwrite a fresher checkpoint
+another, actually-active tab just saved — a stale tab's next pause/hidden event must never clobber
+further-along progress. That protection is not permanent: a tab that resumes genuine watching (real
+playback progressing, or a deliberate seek) can take ownership again normally. Deleting a saved video,
+or clearing all saved videos, must not be quietly undone a moment later by an unrelated, unchanged tab
+for that same video still sitting open — its next lifecycle event does not resurrect what was just
+removed, though continuing to genuinely watch that video afterward is allowed to save a new entry for
+it, since that is legitimate renewed progress, not resurrection. A save that could not be written is
+retried automatically, without any action from the user, the next time a natural save moment occurs —
+never silently dropped and never left stuck retrying the same failed value forever once it succeeds.
+
 ### 5.11 Pinned Videos *(new in v3.0)*
 
 Users can pin a saved video from the saved videos panel (§5.9) to protect it from automatic removal.
@@ -696,10 +708,14 @@ type VideoProgress = {
   title?: string;     // v2.0 — video title, max 200 chars, optional
   channel?: string;   // v2.0 (post-Phase-8 polish) — channel/uploader name, max 200 chars, optional
   pinned?: boolean;   // v3.0 — user-set; absent/false = unpinned; see §5.11
-  ended?: boolean;    // v4.0 — true only when playback genuinely reached the end; absent/false = not finished; see §5.10
-  revision?: number;  // v4.0 — increments on every write to this entry; absent = never written under the v4 schema
-  owner?: string;     // v4.0 — opaque identifier of the tab/session that most recently wrote this entry; display-only, never used for lookup
+  ended?: boolean;    // v4.0 (Phase 7) — true only when playback genuinely reached the end; absent/false = not finished; see §5.10
 };
+// v4.0 (Phase 3): no new persisted fields. Write ownership/freshness (§5.10) is decided from the
+// existing `updated` timestamp plus write-ownership/freshness state the service worker keeps only
+// for its own in-process lifetime (never a durability boundary, same as its command queue) — not a
+// schema addition. An earlier planning pass anticipated persisted `revision`/`owner` fields for this;
+// Phase 3's actual implementation found the existing `updated` field already sufficient and left the
+// schema at v3 until Phase 7's `ended` bump. See DECISIONS.md.
 
 type Settings = {
   minWatchSeconds: number;       // default 30
@@ -716,9 +732,8 @@ enforced identity for a `youtubeResume` entry — the only value ever used as it
 any equality/lookup check. `title` and `channel` are refreshed, display-only metadata: they are
 never read for lookup, comparison, or key derivation anywhere in the codebase, so a title change
 (e.g. a creator editing it after upload) can never create a duplicate entry or break resume for the
-same video. **Unchanged in v4.0:** `ended`, `revision`, and `owner` are likewise never used for
-lookup, comparison, or key derivation — the video ID remains the only identity a `youtubeResume`
-entry has.
+same video. **Unchanged in v4.0:** `ended` is likewise never used for lookup, comparison, or key
+derivation — the video ID remains the only identity a `youtubeResume` entry has.
 
 **Example stored value:**
 
@@ -731,9 +746,7 @@ entry has.
       "updated": 1710000000,
       "title": "Building a UE5 game from scratch",
       "channel": "Some Game Dev Channel",
-      "ended": false,
-      "revision": 7,
-      "owner": "tab-4f2a"
+      "ended": false
     }
   },
   "youtubeResumeSettings": {
@@ -809,13 +822,17 @@ chain above, not in Phase 2's repair work. Also purely additive: `pinned` is opt
 existing entry is valid without it (absent = unpinned). No entry is rewritten by the migration step
 itself; `pinned` is only ever set by an explicit pin action (§5.11).
 
-**Schema Migration — v3 → v4 (Roadmap v4):** the version bump — `ended`, `revision`, and `owner` added,
-`youtubeResumeSchema` advanced to 4 — is purely additive: all three fields are optional and every
-existing entry remains valid without them. An entry with no `ended` field is not assumed unfinished
+**Schema Migration — v3 → v4 (Roadmap v4 Phase 7, D-071-style precedent):** the version bump — `ended`
+added, `youtubeResumeSchema` advanced to 4 — lands exclusively in Phase 7, as one more step in the
+version-aware chain above, matching how v2→v3's `pinned` bump landed exclusively in its own phase
+rather than wherever the migration mechanism was last touched. Purely additive: `ended` is optional and
+every existing entry remains valid without it. An entry with no `ended` field is not assumed unfinished
 outright; it falls back to the conservative legacy-inference rule described in §5.10 (finished only if
 its saved position is within the smallest unit the existing integer-second storage can represent of
-its duration). No entry is rewritten by the migration step itself; `ended`, `revision`, and `owner` are
-set only by ordinary playback and save activity going forward.
+its duration). No entry is rewritten by the migration step itself; `ended` is set only by ordinary
+playback reaching its end going forward. **Phase 3 does not bump the schema** — its write-ownership/
+freshness mechanism (§5.10) uses the existing `updated` field and worker-lifetime-only state, adding no
+persisted field (see §7.3's note; reverses an earlier planning-stage assumption, DECISIONS.md).
 
 ---
 
@@ -1025,7 +1042,7 @@ Full phase-by-phase test tables are in ROADMAP_v2.md. This section defines the c
 | R23 | Concurrent saves from multiple open tabs never lose an entry (§5.10) |
 | R24 | Permissions unchanged from v3.0; the new background service worker requests no permission and issues no network request (§10.3) |
 | R25 | Manifest V3 compliance verified; version reads `4.0.0` |
-| R26 | Storage schema reads v4; every existing v1–v3 entry remains valid without `ended`, `revision`, or `owner` (§7.3, §7.6) |
+| R26 | Storage schema reads v4; every existing v1–v3 entry remains valid without `ended` (§7.3, §7.6) |
 | R27 | All project documents consistent with shipped code |
 
 ---

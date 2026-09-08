@@ -49,6 +49,46 @@ importScripts('../storage/storageValidation.js');
   const PORT_NAME = 'storageWriter';
 
   // -----------------------------------------------------------------
+  // Write ownership / freshness (v4 Phase 3, D-139/D-140). In-memory only,
+  // worker-lifetime state (Roadmap 3.4 says "in the worker" deliberately —
+  // this is not a durability boundary; see the file header's restart-safety
+  // note. A worker restart losing this narrow window is an accepted
+  // tradeoff, not a silent data-loss risk: the worst case is a few seconds
+  // of the pre-Phase-3 F07/F10 behaviour reappearing for that one video
+  // until fresh activity re-establishes ownership, not incorrect data).
+  //
+  // deletionRevisionAt: videoId -> ms epoch of its most recent
+  // DELETE_PROGRESS. globalRevisionAt: ms epoch of the most recent
+  // CLEAR_ALL. Both feed the same freshness check SAVE_PROGRESS already
+  // needs for F07 (a stale session's save vs. a fresher session's
+  // checkpoint) — a deletion/clear is modeled as "the freshest possible
+  // event for this video (or all videos) just happened," so the exact same
+  // comparison also stops a stale, unchanged tab from resurrecting what it
+  // just deleted (Roadmap 3.4/T3.3), while a session showing genuine new
+  // activity since the deletion (continued playback or a real seek) can
+  // still legitimately recreate the entry — that IS "genuinely resumed
+  // watching."
+  // -----------------------------------------------------------------
+  const deletionRevisionAt = new Map();
+  let globalRevisionAt = 0;
+
+  /**
+   * Roadmap 3.3 — true if `payload` (this save's ownership metadata) is
+   * stale relative to the given reference wall-clock time: this session
+   * hasn't been meaningfully active since before that reference, and it
+   * isn't carrying the explicit-user-seek override. A session with no
+   * ownership metadata at all (lastActiveAt not a finite number) is never
+   * treated as stale — only progressTracker sends this metadata; nothing
+   * else calls SAVE_PROGRESS, but this keeps the check from misfiring on
+   * some future/unknown caller instead of silently blocking it.
+   */
+  function isStaleSave(payload, referenceAtMs) {
+    if (payload.explicitUserSeek) return false;
+    if (!Number.isFinite(payload.lastActiveAt)) return false;
+    return payload.lastActiveAt < referenceAtMs;
+  }
+
+  // -----------------------------------------------------------------
   // Migration + repair (moved here verbatim from the old storageManager
   // self-invocation — Phase 1's validation/repair logic, now run once
   // per worker lifetime instead of once per tab/popup, 2.5).
@@ -114,7 +154,7 @@ importScripts('../storage/storageValidation.js');
   // outcome (client retry, 2.7) is always safe.
   // -----------------------------------------------------------------
 
-  async function handleSaveProgress({ videoId, time, duration, title, channel }) {
+  async function handleSaveProgress({ videoId, time, duration, title, channel, sessionId, lastActiveAt, explicitUserSeek, trigger }) {
     if (!isValidVideoId(videoId)) {
       const message = `saveProgress rejected: unresolved videoId (${JSON.stringify(videoId)})`;
       console.warn('[YTResume]', message);
@@ -124,6 +164,24 @@ importScripts('../storage/storageValidation.js');
     const store = result[STORAGE_KEY] ?? {};
     const existingRaw = store[videoId];
     const existing = isPlainObject(existingRaw) ? existingRaw : null;
+
+    // Freshness/ownership check (v4 Phase 3, F07/R23, Roadmap 3.3/3.4).
+    // referenceAtMs is the most recent
+    // "something fresher already happened for this video" moment this
+    // worker knows of: another session's last write, this video's last
+    // deletion, or the last clear-all — whichever is latest. A save whose
+    // own session hasn't been active since before that, and isn't an
+    // explicit user seek, is rejected rather than blindly applied.
+    const referenceAtMs = Math.max(
+      existing && Number.isFinite(existing.updated) ? existing.updated * 1000 : 0,
+      deletionRevisionAt.get(videoId) || 0,
+      globalRevisionAt || 0,
+    );
+    if (isStaleSave({ lastActiveAt, explicitUserSeek }, referenceAtMs)) {
+      const message = `saveProgress rejected: stale session (video ${JSON.stringify(videoId)}, trigger ${JSON.stringify(trigger)})`;
+      console.warn('[YTResume]', message);
+      throw new Error(message);
+    }
 
     const safeTime = safeNumber(time, 0);
     const safeDuration = safeNumber(duration, 0);
@@ -166,6 +224,9 @@ importScripts('../storage/storageValidation.js');
     const store = result[STORAGE_KEY] ?? {};
     delete store[videoId];
     await chrome.storage.local.set({ [STORAGE_KEY]: store });
+    // Roadmap 3.4 — an open, unchanged tab for this video must not
+    // recreate the row it just lost on its next passive lifecycle event.
+    deletionRevisionAt.set(videoId, Date.now());
   }
 
   async function handlePin({ videoId }) {
@@ -204,6 +265,10 @@ importScripts('../storage/storageValidation.js');
 
   async function handleClearAll() {
     await chrome.storage.local.remove(STORAGE_KEY);
+    // Roadmap 3.4 — same reasoning as handleDeleteProgress, applied to
+    // every video at once; per-video deletionRevisionAt entries are
+    // subsumed by this and don't need clearing (max() already covers it).
+    globalRevisionAt = Date.now();
   }
 
   async function handleSetSettings({ partial }) {

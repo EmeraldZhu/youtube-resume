@@ -830,6 +830,48 @@ function stop() {
 - All `storageManager.saveProgress()` calls are fire-and-forget with `.catch()` — tracking must never crash the page
 - `stop()` is idempotent — safe to call multiple times or before `start()`
 
+#### v4 Phase 3 update (D-139/D-140) — supersedes the code blocks above for this section
+
+`lastSavedTime` split into three markers (Roadmap 3.5), plus session identity and ordering state
+(Roadmap 3.1-3.2, 3.6):
+
+```typescript
+let committedTime: number = 0;      // position actually confirmed saved (ack'd) — never advanced optimistically
+let lastAttemptedTime: number = 0;  // updated synchronously the instant any write is issued — backward-jump-guard baseline
+let dirty: boolean = false;         // true from issue until a write for the current value is confirmed committed
+let writeSeq: number = 0;
+let lastAckedSeq: number = 0;       // out-of-order-ack guard (3.6/T3.5)
+let sessionId: string | null = null;      // regenerated every start() — storage-ownership half of the Phase 4 generation token
+let lastActiveAt: number = 0;       // wall-clock ms of this session's last meaningfully-active moment
+let hasUserSeek: boolean = false;   // true once this session has produced a real 'seeked' event
+```
+
+- **Backward-jump guard** now compares against `lastAttemptedTime`, not `committedTime` — a real
+  rewind's own `seeked`-triggered save must exempt the very next interval tick even if that write's
+  ack hasn't landed yet (pre-existing design intent; the ack-gated marker below must not regress it).
+- **Delta guard** (interval trigger only): `!bypassDelta && !dirty && Math.abs(current - committedTime) < 5`.
+  `dirty` staying `true` across a failed/unacknowledged attempt is what makes an unchanged position at
+  an already-*attempted*-but-not-*confirmed* value retry on the next trigger instead of looking
+  saved — closes R24 (F10).
+- **`attemptSave()`** now sends a 6th argument to `storageManager.saveProgress()`: `{ sessionId,
+  lastActiveAt, explicitUserSeek: hasUserSeek, trigger }`. On resolution, `seq <= lastAckedSeq` is
+  ignored (a stale, out-of-order ack); otherwise `lastAckedSeq = seq; committedTime = current`, and
+  `dirty` clears only if `seq === writeSeq` (no newer attempt is still outstanding).
+- **`recordActivity()`** (new) sets `lastActiveAt = Date.now()`. Called from `start()`, from `tick()`
+  only when `!activeVideo.paused`, from the `seeked` and `ended` handlers, and from
+  `notifyExternalReset()`. Deliberately **not** called from `pause`/`visibilitychange`/`pagehide` —
+  those are exactly the passive lifecycle events F07 found could clobber a fresher checkpoint from an
+  actually-active session in another tab.
+- **`handleSeeked`** also sets `hasUserSeek = true` before saving. Treating every `seeked` event as
+  explicit user intent for Phase 3's freshness override is a deliberate simplification — disambiguating
+  a native override's own `seeked` firing from real user intent is Phase 5's job (5.8), not Phase 3's.
+- **`notifyExternalReset()`** additionally sets `hasUserSeek = true` and calls `recordActivity()` — the
+  Restart button click is itself explicit user intent, same spirit as a real seek.
+- **`start()`/`stop()`** reset all of the above (`sessionId` regenerated fresh in `start()`, cleared to
+  `null` in `stop()`).
+
+See §4.6a below for the writer-side half of the freshness check.
+
 ---
 
 ### 4.6 `storageManager.js`
@@ -1405,6 +1447,37 @@ retrying the command from scratch.
 `getDefaultSettings()` covers the remaining failure mode `getSettings()` can't self-heal: the
 `chrome.storage.local.get()` call itself rejecting (not just returning a corrupt value) — see
 §4.1's bootstrap fallback.
+
+**v4 Phase 3 addition — write-ownership/freshness check (D-139/D-140):** `SAVE_PROGRESS`'s payload
+gains `sessionId`, `lastActiveAt` (ms epoch), `explicitUserSeek`, and `trigger` (see §4.5's Phase 3
+addendum for the client side). Before applying a save, `handleSaveProgress` computes:
+
+```javascript
+const referenceAtMs = Math.max(
+  existing && Number.isFinite(existing.updated) ? existing.updated * 1000 : 0,
+  deletionRevisionAt.get(videoId) || 0,
+  globalRevisionAt || 0,
+);
+if (isStaleSave({ lastActiveAt, explicitUserSeek }, referenceAtMs)) throw new Error(/* ... */);
+```
+
+`isStaleSave` returns true (reject) only when `!explicitUserSeek && Number.isFinite(lastActiveAt) &&
+lastActiveAt < referenceAtMs` — a session that hasn't been meaningfully active since before something
+fresher happened for this video (another session's write, or this video's own deletion/a clear-all),
+and isn't carrying an explicit user-seek override. This is F07/R23's fix: a stale, backgrounded tab's
+lifecycle-event save can no longer clobber a more-recently-active session's checkpoint.
+
+`deletionRevisionAt: Map<videoId, msEpoch>` and `globalRevisionAt: number` are **in-memory,
+worker-lifetime only** (Roadmap 3.4 says "in the worker" deliberately) — set by `handleDeleteProgress`
+and `handleClearAll` respectively. Modeling a deletion/clear-all as "the freshest possible event for
+this video (or all videos) just happened" reuses the exact same freshness comparison to also stop a
+stale, unchanged tab from resurrecting a row it doesn't know was just removed (Roadmap 3.4/T3.3),
+while a session showing genuine new activity since the deletion — continued playback or a real seek —
+can still legitimately recreate the entry, because that *is* genuinely resumed watching. This state is
+not persisted: a worker restart in the narrow window between a deletion and a stale tab's next
+lifecycle event loses the protection for that one video until fresh activity re-establishes it — an
+accepted tradeoff per the file's restart-safety design (nothing here is a durability boundary), not a
+data-loss risk.
 
 ---
 
