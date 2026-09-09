@@ -104,6 +104,8 @@ class FakeElement {
     if (this.parentNode) this.parentNode.removeChild(this);
   }
 
+  focus() {} // no-op — no source under test reads focus state, only calls .focus()
+
   addEventListener(type, fn) {
     if (!this._listeners.has(type)) this._listeners.set(type, new Set());
     this._listeners.get(type).add(fn);
@@ -121,6 +123,16 @@ class FakeElement {
 
   querySelector(sel) { return querySelectorImpl(this, sel, true); }
   querySelectorAll(sel) { return querySelectorImpl(this, sel, false); }
+
+  /** Simple-selector-only closest() (single tag/#id/.class, no combinators) — the only form popup.js uses. */
+  closest(sel) {
+    let node = this;
+    while (node) {
+      if (matchesSimple(node, sel)) return node;
+      node = node.parentNode;
+    }
+    return null;
+  }
 }
 
 function walk(node, visit) {

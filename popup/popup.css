@@ -111,6 +111,44 @@ h1, h2, p {
   white-space: nowrap;
 }
 
+/* Remove-completed row (v4.0, Roadmap 7.5) — sits below the header row,
+   still inside the fixed (non-scrolling) header section per UX Spec §6.3. */
+.list-actions-row {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 10px;
+}
+
+.list-actions-row .btn-ghost {
+  width: auto;
+  padding: 5px 10px;
+  font-size: 12px;
+}
+
+.remove-completed-count {
+  font-size: 12px;
+  color: var(--text-muted);
+}
+
+.include-pinned-label {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 12px;
+  color: var(--text-muted);
+  cursor: pointer;
+}
+
+.include-pinned-label input {
+  cursor: pointer;
+}
+
+.list-actions-row .confirm-panel {
+  flex-basis: 100%;
+}
+
 /* Settings header (view 2: back arrow + title) */
 .settings-header {
   display: flex;

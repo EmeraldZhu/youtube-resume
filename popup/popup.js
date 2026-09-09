@@ -74,9 +74,48 @@ document.addEventListener('DOMContentLoaded', async () => {
   const cancelBtn = document.getElementById('cancel-btn');
   const confirmBtn = document.getElementById('confirm-btn');
 
+  // Remove completed (Roadmap 7.5, D-105)
+  const removeCompletedBtn = document.getElementById('remove-completed-btn');
+  const removeCompletedCountEl = document.getElementById('remove-completed-count');
+  const includePinnedCheckbox = document.getElementById('include-pinned-checkbox');
+  const removeCompletedConfirmPanel = document.getElementById('remove-completed-confirm-panel');
+  const removeCompletedBodyEl = document.getElementById('remove-completed-body');
+  const removeCompletedCancelBtn = document.getElementById('remove-completed-cancel-btn');
+  const removeCompletedConfirmBtn = document.getElementById('remove-completed-confirm-btn');
+
   let entryCount = 0;
   let pinnedCount = 0;
   let loadThumbnails = true;
+  // videoId -> entry, kept alongside the DOM rows so the Remove-completed
+  // live count (CP-69/70) can be recomputed without a fresh storage read
+  // every time a pin toggles or a row is removed (Roadmap 7.5's "live,
+  // recomputed whenever the underlying list changes").
+  const entriesById = new Map();
+  // videoId -> <li>, so the batch Remove-completed handler can find each
+  // removed row directly instead of a CSS.escape'd attribute-selector query.
+  const rowsById = new Map();
+
+  /**
+   * Recomputes and renders the Remove-completed button/count (CP-68/69/70/74)
+   * from entriesById against the current include-pinned scope. Returns the
+   * live matching count so callers (the confirm-panel copy) can reuse it.
+   */
+  function refreshRemoveCompletedUI() {
+    const includePinned = includePinnedCheckbox.checked;
+    let n = 0;
+    entriesById.forEach((entry) => {
+      if (!includePinned && entry.pinned) return;
+      if (storageValidation.isCompleteEntry(entry)) n += 1;
+    });
+    if (n === 0) {
+      removeCompletedBtn.disabled = true;
+      removeCompletedCountEl.textContent = 'No completed videos to remove'; // CP-74
+    } else {
+      removeCompletedBtn.disabled = false;
+      removeCompletedCountEl.textContent = n === 1 ? '1 completed video' : `${n} completed videos`; // CP-69/70
+    }
+    return n;
+  }
 
   function updateCount(n) {
     entryCount = n;
@@ -193,7 +232,13 @@ document.addEventListener('DOMContentLoaded', async () => {
     updatePinBadge(thumbWrap, !!entry.pinned);
 
     const duration = entry.duration > 0 ? entry.duration : 0;
-    const percent = duration > 0 ? Math.min(100, Math.max(0, Math.round((entry.time / duration) * 100))) : 0;
+    // barPercent is a proportional visual fill, not a textual claim — it can
+    // reach 100. displayPercent (below) is the number that actually gets
+    // printed as "N% watched" and stays capped under 100 unless the
+    // completion marker is present (Roadmap 7.3/F14/F15): a row must never
+    // read "100% watched" from playhead position/rounding alone.
+    const barPercent = duration > 0 ? Math.min(100, Math.max(0, Math.round((entry.time / duration) * 100))) : 0;
+    const complete = storageValidation.isCompleteEntry(entry);
 
     // Duration badge and watched-progress line render directly on the
     // thumbnail (D-054) — text/CSS only, not an image, so they still show
@@ -207,7 +252,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     thumbProgressTrack.className = 'thumb-progress-track';
     const thumbProgressFill = document.createElement('div');
     thumbProgressFill.className = 'thumb-progress-fill';
-    thumbProgressFill.style.width = `${percent}%`;
+    thumbProgressFill.style.width = `${barPercent}%`;
     thumbProgressTrack.appendChild(thumbProgressFill);
     thumbWrap.appendChild(thumbProgressTrack);
 
@@ -228,7 +273,15 @@ document.addEventListener('DOMContentLoaded', async () => {
 
     const metaEl = document.createElement('p');
     metaEl.className = 'row-meta';
-    metaEl.textContent = `${formatTime(entry.time)} / ${formatTime(duration)} · ${percent}% watched`;
+    if (complete) {
+      // CP-77 — replaces the entire meta line, not just the percent segment
+      // (Completion Display, UX Spec §6.3). Reserved for the completion
+      // marker; percentage alone never earns this label.
+      metaEl.textContent = 'Completed';
+    } else {
+      const displayPercent = duration > 0 ? Math.min(99, Math.max(0, Math.round((entry.time / duration) * 100))) : 0;
+      metaEl.textContent = `${formatTime(entry.time)} / ${formatTime(duration)} · ${displayPercent}% watched`;
+    }
     textBlock.appendChild(metaEl);
 
     link.appendChild(thumbWrap);
@@ -267,6 +320,7 @@ document.addEventListener('DOMContentLoaded', async () => {
       updatePinButton(pinBtn, willPin);
       updatePinBadge(thumbWrap, willPin);
       moveRowToSortedPosition(li, willPin, entry.updated);
+      refreshRemoveCompletedUI(); // pin state can change the default (unpinned-only) matching scope
     });
 
     const removeBtn = document.createElement('button');
@@ -283,8 +337,11 @@ document.addEventListener('DOMContentLoaded', async () => {
         return;
       }
       if (entry.pinned) pinnedCount -= 1;
+      entriesById.delete(videoId);
+      rowsById.delete(videoId);
       li.remove();
       updateCount(entryCount - 1);
+      refreshRemoveCompletedUI();
     });
 
     li.appendChild(link);
@@ -323,10 +380,14 @@ document.addEventListener('DOMContentLoaded', async () => {
       return b[1].updated - a[1].updated;
     });
     entries.forEach(([videoId, entry]) => {
-      listEl.appendChild(buildRow(videoId, entry));
+      entriesById.set(videoId, entry);
+      const row = buildRow(videoId, entry);
+      rowsById.set(videoId, row);
+      listEl.appendChild(row);
     });
     pinnedCount = entries.filter(([, entry]) => entry.pinned).length;
     updateCount(entries.length);
+    refreshRemoveCompletedUI();
   } else {
     // CP-75/CP-76 (UX Spec §6.3 Load-Failure State) — same layout position
     // as the empty state, distinct copy, never the empty-state message.
@@ -334,7 +395,57 @@ document.addEventListener('DOMContentLoaded', async () => {
     emptyStateEl.classList.add('hidden');
     loadFailureEl.classList.remove('hidden');
     clearBtn.disabled = true;
+    removeCompletedBtn.disabled = true;
   }
+
+  includePinnedCheckbox.addEventListener('change', () => {
+    refreshRemoveCompletedUI();
+  });
+
+  removeCompletedBtn.addEventListener('click', () => {
+    const n = refreshRemoveCompletedUI();
+    if (n === 0) return;
+    const countLabel = n === 1 ? '1 completed video' : `${n} completed videos`; // CP-69/70
+    removeCompletedBodyEl.textContent = `This will permanently remove ${countLabel}. This cannot be undone.`; // CP-72
+    removeCompletedBtn.classList.add('hidden');
+    removeCompletedCountEl.classList.add('hidden');
+    includePinnedCheckbox.closest('.include-pinned-label').classList.add('hidden');
+    removeCompletedConfirmPanel.classList.remove('hidden');
+  });
+
+  function restoreRemoveCompletedControls() {
+    removeCompletedConfirmPanel.classList.add('hidden');
+    removeCompletedBtn.classList.remove('hidden');
+    removeCompletedCountEl.classList.remove('hidden');
+    includePinnedCheckbox.closest('.include-pinned-label').classList.remove('hidden');
+  }
+
+  removeCompletedCancelBtn.addEventListener('click', () => {
+    restoreRemoveCompletedControls();
+    removeCompletedBtn.focus();
+  });
+
+  removeCompletedConfirmBtn.addEventListener('click', async () => {
+    const includePinned = includePinnedCheckbox.checked;
+    try {
+      const { removedCount, removedIds } = await storageManager.removeCompleted(includePinned);
+      removedIds.forEach((videoId) => {
+        const entry = entriesById.get(videoId);
+        if (entry?.pinned) pinnedCount -= 1;
+        entriesById.delete(videoId);
+        const row = rowsById.get(videoId);
+        if (row) row.remove();
+        rowsById.delete(videoId);
+      });
+      if (removedCount > 0) updateCount(entryCount - removedCount);
+    } catch (err) {
+      console.warn('[YTResume] Failed to remove completed videos:', err);
+    } finally {
+      restoreRemoveCompletedControls();
+      refreshRemoveCompletedUI();
+      if (!removeCompletedBtn.disabled) removeCompletedBtn.focus();
+    }
+  });
 
   // Clear saved progress (moved into settings view, D-014: youtubeResume only)
   clearBtn.addEventListener('click', () => {

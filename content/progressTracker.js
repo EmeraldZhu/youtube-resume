@@ -93,6 +93,13 @@ const progressTracker = (() => {
   let activeVideo = null;
   let activeVideoId = null;
   let minWatchSeconds = 30; // read once per navigation in start() (Roadmap 7.3)
+  // Roadmap 7.1/D-104 — true from a 'seeked' event that landed within
+  // LEGACY_COMPLETION_TOLERANCE_S of the end, until either the next
+  // 'seeked' event recomputes it or a real 'ended' event consumes it. Lets
+  // handleEnded (below) distinguish a genuine playthrough finish from a
+  // seek-to-end: the schema's `ended` field is only ever set true for the
+  // former ("a real ended event, not a seek-to-end" — Roadmap 7.1).
+  let pendingSeekToEnd = false;
   // Disarmed on every start() (Roadmap 3.1) — no write (interval or event) is
   // accepted until arm() is called once bootstrap.js's resume lifecycle for
   // this video has resolved (Roadmap 3.2).
@@ -136,9 +143,14 @@ const progressTracker = (() => {
    *   followed by a synthetic 'seeked' must still be caught by the
    *   backward-jump guard, not waved through just because it's an event
    *   trigger.
+   * @param {boolean} [markEnded=false] - Roadmap 7.1/D-104: true only from
+   *   handleEnded when this 'ended' event represents a genuine playthrough
+   *   finish, not a seek-to-end. Forwarded to storageManager.saveProgress
+   *   as ownership.ended; the writer sets the schema's `ended` field
+   *   (sticky) only when this is true.
    * @returns {{ok: boolean, reason?: string}}
    */
-  function attemptSave(bypassDelta, trigger, bypassBackwardJumpGuard = bypassDelta) {
+  function attemptSave(bypassDelta, trigger, bypassBackwardJumpGuard = bypassDelta, markEnded = false) {
     // Phase 0 (v3) diagnostic — logged on every call, before any guard can
     // return early, per Roadmap v3 0.3 (videoId, trigger, position-to-write).
     debugLogger.log('attemptSave:entry', {
@@ -225,6 +237,7 @@ const progressTracker = (() => {
       lastActiveAt,
       explicitUserSeek: hasUserSeek,
       trigger,
+      ended: markEnded,
     }).then(() => {
       // Out-of-order ack guard (Roadmap 3.6/T3.5): a slower earlier write
       // resolving after a faster later one must not regress state the
@@ -294,6 +307,7 @@ const progressTracker = (() => {
     ticksSinceSave = 0;
     lastSaveCheckAt = Date.now();
     lastGoodSample = null;
+    pendingSeekToEnd = false;
     armed = false; // Roadmap 3.1 — disarmed on every load; bootstrap.js calls arm() once the resume lifecycle resolves
 
     // Event-based triggers — all save unconditionally (D-024)
@@ -326,9 +340,25 @@ const progressTracker = (() => {
       if (corroborated || result.reason !== 'backwardJumpRejected') {
         lastAttemptedTime = current;
       }
+      // Roadmap 7.1/D-104 — a seek landing at (or within tolerance of) the
+      // end means any 'ended' event that follows is a seek-to-end, not a
+      // genuine playthrough finish; recomputed on every seek so a seek away
+      // from the end afterward correctly clears it.
+      const seekDuration = Math.floor(video.duration);
+      pendingSeekToEnd = Number.isFinite(seekDuration) && seekDuration > 0
+        && (seekDuration - current) <= storageValidation.LEGACY_COMPLETION_TOLERANCE_S;
       captureGoodSampleIfClean();
     };
-    handleEnded = () => { recordActivity(); attemptSave(true, 'ended'); captureGoodSampleIfClean(); };
+    handleEnded = () => {
+      recordActivity();
+      // Consumed here, not left for the next seek to clear — a later
+      // genuine finish (e.g. a replay) must not be suppressed by a
+      // seek-to-end from earlier in the session.
+      const genuineCompletion = !pendingSeekToEnd;
+      pendingSeekToEnd = false;
+      attemptSave(true, 'ended', true, genuineCompletion);
+      captureGoodSampleIfClean();
+    };
     handleVisibility = () => {
       if (document.hidden) attemptSave(true, 'visibility');
     };
@@ -502,6 +532,7 @@ const progressTracker = (() => {
     lastActiveAt = 0;
     lastSaveCheckAt = 0;
     lastGoodSample = null;
+    pendingSeekToEnd = false;
     minWatchSeconds = 30;
   }
 

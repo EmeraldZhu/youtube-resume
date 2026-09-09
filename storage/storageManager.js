@@ -17,21 +17,25 @@
  *   storageManager.pinProgress(videoId)    → Promise<void>
  *     (rejects if no entry exists, or the 20-pin cap is already reached — never auto-unpins)
  *   storageManager.unpinProgress(videoId)  → Promise<void>
+ *   storageManager.removeCompleted(includePinned?) → Promise<{removedCount, removedIds}>
+ *     (v4 Phase 7 — one coordinated batch mutation; the writer re-derives the
+ *     matching set itself at commit time via storageValidation.isCompleteEntry,
+ *     never trusting a client-supplied id list)
  *   storageManager.getSettings()           → Promise<Settings>
  *   storageManager.saveSettings(partial)   → Promise<Settings>
  *   storageManager.resetSettings()         → Promise<Settings>
  *   storageManager.getDefaultSettings()    → Settings (sync, no storage access)
  *
  * Types:
- *   VideoProgress = { time: number, duration: number, updated: number, title?: string, channel?: string, pinned?: boolean }
+ *   VideoProgress = { time: number, duration: number, updated: number, title?: string, channel?: string, pinned?: boolean, ended?: boolean }
  *
- * Storage shape (schema v3) — see storage/storageValidation.js for the
+ * Storage shape (schema v4) — see storage/storageValidation.js for the
  * shared constants/validation/repair logic this module and
  * background/storageWriter.js both use:
  *   {
  *     youtubeResume: { [videoId]: VideoProgress },
  *     youtubeResumeSettings: Settings,
- *     youtubeResumeSchema: 3,
+ *     youtubeResumeSchema: 4,
  *     youtubeResumeQuarantine: { entries: { [rawKey]: QuarantineEntry }, repairLog: RepairLogEntry[] }
  *   }
  *
@@ -228,13 +232,17 @@ const storageManager = (() => {
    * @param {object} [ownership] - v4 Phase 3 write-ownership/freshness
    *   metadata for the calling playback session (Roadmap 3.1-3.3):
    *   { sessionId, lastActiveAt: ms epoch of this session's last
-   *   meaningfully-active moment, explicitUserSeek: boolean, trigger }.
-   *   The writer uses this to reject a save from a session that has been
-   *   inactive since before the entry's (or a deletion's) more recent
-   *   timestamp — closes F07/R23. Omitted entirely by a non-tracking
-   *   caller (there are none today; every saveProgress call comes from
-   *   progressTracker), in which case the writer applies no freshness
-   *   check.
+   *   meaningfully-active moment, explicitUserSeek: boolean, trigger,
+   *   ended: boolean }.
+   *   The writer uses lastActiveAt/explicitUserSeek to reject a save from a
+   *   session that has been inactive since before the entry's (or a
+   *   deletion's) more recent timestamp — closes F07/R23. `ended` (v4
+   *   Phase 7, D-104) marks a genuine finish (a real `ended` event, not a
+   *   seek-to-end — content/progressTracker.js decides this) and is sticky
+   *   once true, same preserve-if-omitted spirit as title/channel. Omitted
+   *   entirely by a non-tracking caller (there are none today; every
+   *   saveProgress call comes from progressTracker), in which case the
+   *   writer applies no freshness check and no completion write.
    *
    * Rejects if videoId isn't a plausible YouTube video ID shape, or if the
    * writer's freshness check judges this session stale (Roadmap 3.3/3.4) —
@@ -254,6 +262,7 @@ const storageManager = (() => {
       lastActiveAt: ownership?.lastActiveAt ?? null,
       explicitUserSeek: !!ownership?.explicitUserSeek,
       trigger: ownership?.trigger ?? null,
+      ended: !!ownership?.ended,
     });
     // Phase 0 (v3) diagnostic — defects A/B (Roadmap v3 0.2). No-ops when DEBUG is false.
     debugLogger.log('saveProgress', {
@@ -294,6 +303,22 @@ const storageManager = (() => {
   async function unpinProgress(videoId) {
     assertRuntimeAvailable();
     await sendCommand('UNPIN', { videoId });
+  }
+
+  /**
+   * Removes every entry matching the completion predicate
+   * (storageValidation.isCompleteEntry) in one coordinated batch mutation
+   * (Roadmap 7.5, D-105). Pinned entries are excluded unless includePinned
+   * is true. The matching set is re-derived by the writer at commit time,
+   * never trusting a client-supplied id list — a concurrent save (T7.4)
+   * changing an entry's completion state between the popup's preview and
+   * the click is resolved against current storage, not a stale snapshot.
+   *
+   * @returns {Promise<{removedCount: number, removedIds: string[]}>}
+   */
+  async function removeCompleted(includePinned) {
+    assertRuntimeAvailable();
+    return sendCommand('REMOVE_COMPLETED', { includePinned: !!includePinned });
   }
 
   /**
@@ -347,6 +372,7 @@ const storageManager = (() => {
     clearAllProgress,
     pinProgress,
     unpinProgress,
+    removeCompleted,
     getSettings,
     saveSettings,
     resetSettings,

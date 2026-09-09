@@ -24,7 +24,13 @@ const storageValidation = (() => {
   const MAX_TITLE_LENGTH = 200;
   const MAX_PINNED = 20; // v3 Phase 4, D-067 — refused past this, never auto-unpinned
   const MAX_REPAIR_LOG = 20; // v4 Phase 1, D-127/1.4 — bounded local retention, not a permanent audit log
-  const CURRENT_SCHEMA_VERSION = 3;
+  const CURRENT_SCHEMA_VERSION = 4;
+  // Roadmap 7.2/D-104 — legacy completion inference: an entry saved before
+  // the `ended` field existed (or any entry where it was never set true)
+  // has no way to record a genuine finish; the strictest defensible reading
+  // integer-second storage supports is "landed within the smallest
+  // representable unit of the end."
+  const LEGACY_COMPLETION_TOLERANCE_S = 1;
 
   const DEFAULT_SETTINGS = {
     minWatchSeconds: 30,
@@ -128,6 +134,10 @@ const storageValidation = (() => {
     if (channel) merged.channel = channel; else delete merged.channel;
 
     if (a.pinned || b.pinned) merged.pinned = true; else delete merged.pinned;
+    // ended uses the same OR semantics as pinned (v4 Phase 7): a duplicate
+    // row must never lose a genuine completion fact by being on the
+    // "other" side of a merge.
+    if (a.ended || b.ended) merged.ended = true; else delete merged.ended;
     return merged;
   }
 
@@ -241,7 +251,31 @@ const storageValidation = (() => {
     const channel = typeof raw.channel === 'string' ? raw.channel.trim() : '';
     if (channel) sanitized.channel = channel.slice(0, MAX_TITLE_LENGTH);
     if (raw.pinned === true) sanitized.pinned = true;
+    if (raw.ended === true) sanitized.ended = true;
     return sanitized;
+  }
+
+  /**
+   * Completion predicate (v4 Phase 7, D-104): true when playback is a known
+   * fact to have reached the end. Used identically by the popup's display
+   * (Completion Display, UX Spec §6.3), the "Only at the end" resume option
+   * (Roadmap 7.7), and the "Remove completed" batch action (7.5) — one
+   * definition, never re-derived differently per caller.
+   *
+   *   - entry.ended === true (a genuine `ended` event, content/progressTracker.js)
+   *     is authoritative.
+   *   - Otherwise, the legacy inference rule: Math.floor(time) >= duration -
+   *     LEGACY_COMPLETION_TOLERANCE_S. Deliberately the conservative failure
+   *     direction (K4) — under-inclusion only affects a convenience display/
+   *     action, never destroys data.
+   */
+  function isCompleteEntry(entry) {
+    if (!isPlainObject(entry)) return false;
+    if (entry.ended === true) return true;
+    const duration = safeNumber(entry.duration, 0);
+    if (duration <= 0) return false;
+    const time = safeNumber(entry.time, 0);
+    return Math.floor(time) >= duration - LEGACY_COMPLETION_TOLERANCE_S;
   }
 
   /**
@@ -290,6 +324,14 @@ const storageValidation = (() => {
       // entry needs a rewrite, so this step is also a no-op.
       async run() {},
     },
+    {
+      to: 4,
+      // v3 -> v4 (v4 Phase 7, 7.1/D-104) adds optional `ended`, defaulting
+      // to absent = not (yet) known to have finished. Purely additive — an
+      // existing entry with no `ended` field simply falls back to the
+      // legacy inference rule (isCompleteEntry above); no rewrite needed.
+      async run() {},
+    },
   ];
 
   return {
@@ -302,6 +344,7 @@ const storageValidation = (() => {
     MAX_PINNED,
     MAX_REPAIR_LOG,
     CURRENT_SCHEMA_VERSION,
+    LEGACY_COMPLETION_TOLERANCE_S,
     DEFAULT_SETTINGS,
     ALLOWED_MIN_WATCH_SECONDS,
     ALLOWED_COMPLETION_THRESHOLD,
@@ -320,6 +363,7 @@ const storageValidation = (() => {
     repairStore,
     sanitizeEntry,
     sanitizeSettingsValue,
+    isCompleteEntry,
     MIGRATION_STEPS,
   };
 })();

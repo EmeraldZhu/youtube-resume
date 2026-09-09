@@ -361,7 +361,10 @@ const resumeManager = (() => {
           if (!isCurrent()) return;
           const metadataResult = await establishContentMetadata(video, isCurrent);
           if (!isCurrent() || !metadataResult.ok) return;
-          const shouldResumeResult = timeUtils.shouldResume(saved.time, video.duration, minWatchSeconds, completionThreshold);
+          const shouldResumeResult = timeUtils.shouldResume(
+            saved.time, video.duration, minWatchSeconds, completionThreshold,
+            storageValidation.isCompleteEntry(saved),
+          );
           debugLogger.log('tryResume:deferredMetadataRecovered', {
             attemptId,
             videoDuration: video.duration,
@@ -439,8 +442,13 @@ const resumeManager = (() => {
       return outcome(OUTCOME.FAILED, metadataResult.reason, saved.time, video.currentTime, attemptId);
     }
 
-    // Validate resume conditions against real, post-ad content metadata
-    const shouldResumeResult = timeUtils.shouldResume(saved.time, video.duration, minWatchSeconds, completionThreshold);
+    // Validate resume conditions against real, post-ad content metadata.
+    // isComplete (Roadmap 7.7/D-104) only matters when completionThreshold
+    // is the "Only at the end" sentinel — shouldResume ignores it otherwise.
+    const shouldResumeResult = timeUtils.shouldResume(
+      saved.time, video.duration, minWatchSeconds, completionThreshold,
+      storageValidation.isCompleteEntry(saved),
+    );
     debugLogger.log('tryResume:shouldResume', {
       attemptId,
       result: shouldResumeResult,

@@ -65,6 +65,31 @@ function buildPopupDom(document) {
   viewList.appendChild(emptyStateEl);
   viewList.appendChild(loadFailureEl);
 
+  // Remove completed (v4 Phase 7, Roadmap 7.5/D-105) — mirrors popup.html's
+  // list-actions-row structure closely enough for popup.js's getElementById/
+  // closest('.include-pinned-label') calls to resolve correctly.
+  const listActionsRow = el(document, 'div', null, 'list-actions-row');
+  const removeCompletedBtn = el(document, 'button', 'remove-completed-btn');
+  removeCompletedBtn.disabled = true;
+  const removeCompletedCountEl = el(document, 'span', 'remove-completed-count');
+  const includePinnedLabel = el(document, 'label', null, 'include-pinned-label');
+  const includePinnedCheckbox = el(document, 'input', 'include-pinned-checkbox');
+  includePinnedCheckbox.setAttribute('type', 'checkbox');
+  includePinnedLabel.appendChild(includePinnedCheckbox);
+  const removeCompletedConfirmPanel = el(document, 'div', 'remove-completed-confirm-panel');
+  removeCompletedConfirmPanel.classList.add('hidden');
+  const removeCompletedBodyEl = el(document, 'p', 'remove-completed-body');
+  const removeCompletedCancelBtn = el(document, 'button', 'remove-completed-cancel-btn');
+  const removeCompletedConfirmBtn = el(document, 'button', 'remove-completed-confirm-btn');
+  removeCompletedConfirmPanel.appendChild(removeCompletedBodyEl);
+  removeCompletedConfirmPanel.appendChild(removeCompletedCancelBtn);
+  removeCompletedConfirmPanel.appendChild(removeCompletedConfirmBtn);
+  listActionsRow.appendChild(removeCompletedBtn);
+  listActionsRow.appendChild(removeCompletedCountEl);
+  listActionsRow.appendChild(includePinnedLabel);
+  listActionsRow.appendChild(removeCompletedConfirmPanel);
+  viewList.appendChild(listActionsRow);
+
   const confirmCountEl = el(document, 'span', 'confirm-count');
   const confirmPinnedNoteEl = el(document, 'p', 'confirm-pinned-note');
   confirmPinnedNoteEl.classList.add('hidden');
@@ -90,7 +115,12 @@ function buildPopupDom(document) {
   viewSettings.appendChild(resetBtn);
   viewSettings.appendChild(resetConfirmPanel);
 
-  return { listEl, emptyStateEl, loadFailureEl, clearBtn, countEl };
+  return {
+    listEl, emptyStateEl, loadFailureEl, clearBtn, countEl,
+    removeCompletedBtn, removeCompletedCountEl, includePinnedCheckbox,
+    removeCompletedConfirmPanel, removeCompletedBodyEl,
+    removeCompletedCancelBtn, removeCompletedConfirmBtn,
+  };
 }
 
 /**

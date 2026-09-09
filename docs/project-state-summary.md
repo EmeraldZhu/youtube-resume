@@ -20,7 +20,7 @@ Phases 4–9 are still planning only.
 | 4 | Resume Identity & Cancellation | AWAITING VERIFICATION | — |
 | 5 | Verified Resume Outcomes | DONE | — |
 | 6 | Deferred Recovery Lifecycle | AWAITING VERIFICATION | — |
-| 7 | Completion Policy & Remove Completed | NOT STARTED | — |
+| 7 | Completion Policy & Remove Completed | AWAITING VERIFICATION | — |
 | 8 | Popup Reconciliation & Accessibility | NOT STARTED | — |
 | 9 | Regression, Docs & Store Release | NOT STARTED | — |
 
@@ -46,32 +46,29 @@ A phase is `DONE` only when the owner confirms it. Claude Code never writes `DON
 
 ## Next action
 
-Phase 6 AWAITING VERIFICATION (Gate B): a session that never established (player-discovery or
-metadata-wait timeout) now stays recoverable instead of being abandoned. `resumeManager` self-heals a
-metadata timeout via `OUTCOME.DEFERRED` + a one-shot `loadedmetadata` listener (R6). `bootstrap.js`
-re-attempts a player-discovery timeout on `visibilitychange`/`pageshow` (R11, no new timer).
-`playerObserver`'s single `MutationObserver` now stays alive permanently, doubling as a
-`watchForReplacement()` watch for a player-element swap with no video-ID change. `progressTracker.stop()`
-flushes a final sample before teardown, falling back to a `lastGoodSample` cache when mid-seek (R10); a
-new `video.seeking` guard rejects any mid-seek save. Save cadence keeps its 5-tick trigger with a
-wall-clock OR-condition added only for a suspended/throttled tab (a full wall-clock replacement broke
-~10 existing harness cases and was reverted). Checkpoint-loss budget documented in PRD §5.4.
-Self-verified via `node tests/run.js`: R6/R10/R11 flip to `not-reproduced` (R11 rewritten to assert
-recovery at the bootstrap level where the fix lives — D-173); 4 new T6 cases pass; zero regressions (50
-cases total). A live-verification pass (D-175) found `OUTCOME.PENDING` — a seek that never settled —
-was also meant to be Phase 6-recoverable (a Phase 5 test comment already promised this); fixed and
-covered by a new case. Decisions D-168–D-176. **Live verification (`chrome-devtools-mcp`) completed
-this session (D-176):** ordinary resume confirmed unaffected; the recovery-trigger wiring confirmed to
-actually re-fire on a real `visibilitychange` in real Chrome (a second live resume attempt observed).
-Full end-to-end recovery, a genuine bfcache restore, and real tab freeze/discard were not witnessed
-live — sandbox network/tooling limits, not code defects; see D-176 for exactly what did and didn't run.
-Nothing else blocking.
+Phase 6 AWAITING VERIFICATION (Gate B): deferred recovery lifecycle (visibility/pageshow re-attempt,
+`OUTCOME.DEFERRED`/`PENDING` self-heal, single-observer replacement watch, teardown flush). Self- and
+live-verified (D-168–D-176); full end-to-end recovery/bfcache/freeze-discard not witnessed live —
+sandbox limits, not code defects (D-176).
+
+Phase 7 AWAITING VERIFICATION: completion is now a fact (`ended: boolean`, schema v4, additive;
+D-104), decoupled from the resume cutoff. Legacy inference `floor(time) >= duration-1`
+(`storageValidation.isCompleteEntry`, the one predicate shared by display/resume/removal — D-180).
+Popup caps displayed percent at 99 unless complete (D-117); "Only at the end" is a fourth
+`completionThreshold` segment (sentinel `1`, D-106). "Remove completed" ships in the list header
+(D-116): live count, pinned excluded by default (opt-in checkbox, D-118), inline confirm (CP-71/72),
+one batched `REMOVE_COMPLETED` writer command that re-derives the match set server-side (D-181) and
+integrates deletion-revision (7.6). `meetsMinimumWatched` fixed to inclusive `>=`, matching CP-42h's
+"less than this" (D-179). `pendingSeekToEnd` distinguishes a genuine finish from a seek-to-end for the
+`ended` write (D-178). Self-verified: `node tests/run.js` — 56 cases, zero regressions, 6 new Phase 7
+cases (D-182). No live browser verification this session (see owner checks below). Decisions
+D-104–D-106, D-116–D-120, D-177–D-182.
 
 ## Doc versions
 
 PRD **4.0.0** · UX Spec **4.0.0** · TDD **4.0.0-draft** (§1/§1.2/§2/§4.6 updated for the v4
-service-worker architecture; §4.2/§4.3 updated for Phase 6's deferred-recovery lifecycle;
-remaining sections pending per-phase updates) ·
+service-worker architecture; §4.2/§4.3 for Phase 6's deferred-recovery lifecycle; §4.5/§4.6/§4.6a/§4.9/§4.11
+updated for Phase 7's completion policy/Remove-completed; remaining sections pending per-phase updates) ·
 Roadmap v2 2.0.0 · Roadmap v3 3.0.0 (shipped) · Roadmap v4 (draft).
 
 **Constraint amendment (D-125):** CLAUDE.md's storage-access rule now permits two modules to touch

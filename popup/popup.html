@@ -27,6 +27,24 @@
             <button id="settings-btn" class="icon-btn" type="button" aria-label="Settings">⚙</button>
           </div>
         </div>
+
+        <div class="list-actions-row" id="list-actions-row">
+          <button id="remove-completed-btn" class="btn-ghost" type="button" disabled>Remove completed</button>
+          <span id="remove-completed-count" class="remove-completed-count"></span>
+          <label class="include-pinned-label">
+            <input type="checkbox" id="include-pinned-checkbox">
+            Include pinned videos
+          </label>
+
+          <div id="remove-completed-confirm-panel" class="confirm-panel hidden" role="status" aria-live="polite">
+            <p class="confirm-text">Remove completed videos?</p>
+            <p class="confirm-subtext" id="remove-completed-body"></p>
+            <div class="confirm-actions">
+              <button id="remove-completed-cancel-btn" class="btn-ghost btn-cancel">Cancel</button>
+              <button id="remove-completed-confirm-btn" class="btn-danger">Remove</button>
+            </div>
+          </div>
+        </div>
       </header>
 
       <hr class="divider">
@@ -74,8 +92,9 @@
           <button type="button" class="segment" data-value="0.9">90%</button>
           <button type="button" class="segment" data-value="0.95">95%</button>
           <button type="button" class="segment" data-value="0.98">98%</button>
+          <button type="button" class="segment" data-value="1">Only at the end</button>
         </div>
-        <p class="setting-helper">Videos watched past this point won't resume.</p>
+        <p class="setting-helper">Videos watched past this point won't resume. "Only at the end" waits until the video actually finishes.</p>
       </div>
 
       <hr class="divider">

@@ -11,7 +11,9 @@ const { loadExtension } = require('../lib/harness');
  * backward compatible (every existing call site that omits it is
  * unaffected; storageManager.js defaults each field via `?.`), so this
  * case now asserts arity 6 for saveProgress specifically rather than
- * flagging the intentional change as a regression.
+ * flagging the intentional change as a regression. Phase 7 (Roadmap 7.5,
+ * D-105) adds one wholly new export, removeCompleted — also intentional,
+ * asserted here rather than treated as drift.
  */
 const EXPECTED_API = {
   getProgress: 1,
@@ -21,6 +23,7 @@ const EXPECTED_API = {
   clearAllProgress: 0,
   pinProgress: 1,
   unpinProgress: 1,
+  removeCompleted: 1,
   getSettings: 0,
   saveSettings: 1,
   resetSettings: 0,

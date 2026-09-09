@@ -735,7 +735,24 @@ progressTracker.stop(): void
 progressTracker.tick(): void
 progressTracker.arm(): void                 // v3 Phase 3, D-066
 progressTracker.notifyExternalReset(): void  // v3 Phase 3, D-066
+progressTracker.protectCheckpoint(time: number): void  // v4 Phase 5, D-163
+progressTracker.markUserDirected(): void               // v4 Phase 5, D-164
 ```
+
+> This section predates v4 Phases 3–6 (session identity/write-ownership, verified outcomes, deferred
+> recovery) and is stale on those mechanisms — see DECISIONS.md D-140/D-163/D-164/D-172 and
+> `content/progressTracker.js`'s own inline comments for the current design; full reconciliation is
+> Phase 9 scope (CLAUDE.md's documented drift).
+>
+> **v4 Phase 7 addition (D-104/D-178):** a session-local `pendingSeekToEnd` flag distinguishes a
+> genuine playthrough finish from a seek-to-end for the schema's `ended` field. `handleSeeked` sets it
+> true when the landing position is within `storageValidation.LEGACY_COMPLETION_TOLERANCE_S` of
+> `video.duration` (recomputed on every seek, so seeking away from the end clears it); `handleEnded`
+> reads and clears it, calling `attemptSave(true, 'ended', true, genuineCompletion)` where
+> `genuineCompletion = !pendingSeekToEnd`. The new 4th `attemptSave` parameter, `markEnded`, is
+> forwarded to `storageManager.saveProgress()`'s `ownership.ended` and from there to the writer's
+> `SAVE_PROGRESS` payload. `meetsMinimumWatched()` (used by this module's save gate and by
+> `resumeManager`) changed from strict `>` to inclusive `>=` (D-179).
 
 `tick()`, added Phase 9 (D-059), is called once per 1000ms by `navigationManager`'s existing poll
 interval (wired through `bootstrap.js`) rather than `progressTracker` owning its own `setInterval`.
@@ -1016,6 +1033,10 @@ storageManager.getSettings(): Promise<Settings>              // v2 — Phase 6
 storageManager.saveSettings(partial: Partial<Settings>): Promise<Settings>  // v2 — Phase 6
 storageManager.resetSettings(): Promise<Settings>             // v2 — Phase 6
 storageManager.getDefaultSettings(): Settings                 // v2 — Phase 7, sync, no storage access
+storageManager.removeCompleted(includePinned?: boolean): Promise<{removedCount: number, removedIds: string[]}>
+// v4 — Phase 7, D-105/D-181. One coordinated batch mutation; the writer re-derives the
+// matching set (storageValidation.isCompleteEntry) from current storage at commit time,
+// never a client-supplied id list. Pinned entries excluded unless includePinned is true.
 ```
 
 #### Types
@@ -1029,6 +1050,11 @@ type VideoProgress = {
   channel?: string;   // v2 (Phase 8 polish) — optional, capped at 200 chars
   pinned?: boolean;   // v3 (Phase 4) — optional; absent/false = unpinned, so no
                        // existing v2 entry needs a rewrite
+  ended?: boolean;    // v4 (Phase 7, D-104) — optional; absent/false = not known finished.
+                       // Set true only by a genuine `ended` event on confirmed, non-ad
+                       // content (never a seek-to-end — see §4.5's pendingSeekToEnd),
+                       // and sticky thereafter (OR-preserved across saves and merges,
+                       // same as `pinned`). See storageValidation.isCompleteEntry below.
 };
 
 type Settings = {
@@ -1069,8 +1095,17 @@ const MAX_ENTRIES = 200;
 const MAX_TITLE_LENGTH = 200;                    // v2
 const MAX_PINNED = 20;                           // v3 (Phase 4, D-067) — refused past this, never auto-unpinned
 const MAX_REPAIR_LOG = 20;                       // v4 (Phase 1, 1.4) — bounded local retention, not a permanent audit log
-const CURRENT_SCHEMA_VERSION = 3;                // v3 (Phase 4, D-071) — bumped exclusively here; unchanged this phase
+const CURRENT_SCHEMA_VERSION = 4;                // v4 (Phase 7, D-104) — bumped exclusively here for `ended`
+const LEGACY_COMPLETION_TOLERANCE_S = 1;         // v4 (Phase 7) — see isCompleteEntry below
 ```
+
+**`storageValidation.isCompleteEntry(entry): boolean`** (v4 Phase 7, D-104/D-180) — the single
+completion predicate, shared verbatim by the popup's row display, `timeUtils.shouldResume`'s "Only at
+the end" branch, and `storageWriter.js`'s `handleRemoveCompleted`: `entry.ended === true` is
+authoritative; otherwise the legacy inference rule `Math.floor(entry.time) >= entry.duration -
+LEGACY_COMPLETION_TOLERANCE_S` applies (the strictest defensible reading given integer-second
+storage — K4's deliberate under-inclusion-over-false-positive tradeoff). `mergeEntryPair()` preserves
+`ended` via the same OR semantics as `pinned`.
 
 `youtubeResumeQuarantine` is a fourth, additive root key (v4 Phase 1, D-127) — never nested inside
 `youtubeResume` (its keys aren't progress entries and must never be counted for the `MAX_ENTRIES`
@@ -1504,12 +1539,23 @@ resume/tracking/UI logic and makes zero network requests. Classic (non-`"module"
 `storageManager.js` uses for reads.
 
 **Command protocol:** one message type per mutation — `SAVE_PROGRESS`, `DELETE_PROGRESS`, `PIN`,
-`UNPIN`, `CLEAR_ALL`, `SET_SETTINGS`, `RESET_SETTINGS`, `REPAIR`, `MIGRATE` — each carrying the full
-parameters needed to apply it from scratch (no delta/increment commands). A message is
-`{ id, command, payload }`; a response is `{ id, ok: true, result }` or `{ id, ok: false, error }`.
-`RESET_SETTINGS` is a Tier 2 addition beyond the roadmap's illustrative eight — `resetSettings()`
-already existed as a distinct public mutation (v2.0.0 Phase 6) and needed its own full-replace
-command rather than overloading `SET_SETTINGS` with a reset flag.
+`UNPIN`, `REMOVE_COMPLETED`, `CLEAR_ALL`, `SET_SETTINGS`, `RESET_SETTINGS`, `REPAIR`, `MIGRATE` —
+each carrying the full parameters needed to apply it from scratch (no delta/increment commands). A
+message is `{ id, command, payload }`; a response is `{ id, ok: true, result }` or `{ id, ok: false,
+error }`. `RESET_SETTINGS` is a Tier 2 addition beyond the roadmap's illustrative eight —
+`resetSettings()` already existed as a distinct public mutation (v2.0.0 Phase 6) and needed its own
+full-replace command rather than overloading `SET_SETTINGS` with a reset flag.
+
+**`REMOVE_COMPLETED` (v4 Phase 7, D-105/D-181):** `handleRemoveCompleted({ includePinned })` does one
+`chrome.storage.local.get(STORAGE_KEY)`, filters to entries where `storageValidation.isCompleteEntry(entry)`
+is true and (`includePinned` or `!entry.pinned`), deletes each matching key from the in-memory store,
+and — only if the matched set is non-empty — one `chrome.storage.local.set`. Malformed
+(non-plain-object) rows are skipped, never thrown on. Returns `{ removedCount, removedIds }`. The
+matching set is derived from storage at the moment this command runs in the queue, never from a
+client-supplied id list — closes the TOCTOU gap between the popup's last read and the user's click
+(T7.4). Each `removedId` also gets a `deletionRevisionAt` bump (same map `DELETE_PROGRESS` already
+uses, §4.6a below), so an open, unchanged tab for a just-removed video doesn't recreate it on its next
+passive lifecycle event (7.6).
 
 **Serialization (2.3):** a single promise-chain queue (`queueTail`) — each incoming command is
 appended via `queueTail.then(task, task)`, so commands always execute one at a time, each seeing the
@@ -1800,10 +1846,18 @@ function getChannelName() { /* see utils/youtubeUtils.js */ }
 #### Public API
 
 ```typescript
-timeUtils.shouldResume(savedTime: number, duration: number, minWatchSeconds?: number, completionThreshold?: number): boolean
+timeUtils.shouldResume(savedTime: number, duration: number, minWatchSeconds?: number, completionThreshold?: number, isComplete?: boolean): boolean
 timeUtils.meetsMinimumWatched(savedTime: number, minWatchSeconds?: number): boolean
 timeUtils.getResumeTime(savedTime: number, rewindSeconds?: number): number
 ```
+
+**v4 Phase 7 (Roadmap 7.4/7.7, D-179/D-180):** `meetsMinimumWatched` changed from strict `>` to
+inclusive `>=`, matching UX Spec CP-42h's "less than this" wording exactly (a saved time equal to the
+threshold now counts as watched enough). `shouldResume` gained a 5th param, `isComplete` (default
+`false`) — when `completionThreshold` is the "Only at the end" sentinel (`1`, D-106), eligibility
+returns `!isComplete` instead of evaluating the percentage comparison; `isComplete` is precomputed by
+the caller via `storageValidation.isCompleteEntry(saved)` (kept out of this module to preserve
+`utils/`'s no-dependencies convention — see `content/resumeManager.js`'s two call sites).
 
 **Phase 7 (Roadmap 7.1, 7.2, D-049):** every threshold is now a caller-supplied argument, not a
 fixed module constant. The constants below became *defaults only*, used when a caller omits the
@@ -1822,13 +1876,14 @@ const ROLLBACK_SECONDS     = 2;
 // below the minimum before paying for the metadata wait (D-038) — no
 // duration value could make shouldResume() true in that case anyway.
 function meetsMinimumWatched(savedTime, minWatchSeconds = MIN_RESUME_SECONDS) {
-  return savedTime > minWatchSeconds;
+  return savedTime >= minWatchSeconds; // v4 Phase 7, D-179 — was strict >
 }
 
-function shouldResume(savedTime, duration, minWatchSeconds = MIN_RESUME_SECONDS, completionThreshold = COMPLETION_THRESHOLD) {
+function shouldResume(savedTime, duration, minWatchSeconds = MIN_RESUME_SECONDS, completionThreshold = COMPLETION_THRESHOLD, isComplete = false) {
   if (!duration || isNaN(duration) || duration === Infinity) return false;
-  return meetsMinimumWatched(savedTime, minWatchSeconds) &&
-         savedTime < duration * completionThreshold;
+  if (!meetsMinimumWatched(savedTime, minWatchSeconds)) return false;
+  if (completionThreshold >= 1) return !isComplete; // v4 Phase 7, D-106/D-180 — "Only at the end"
+  return savedTime < duration * completionThreshold;
 }
 
 function getResumeTime(savedTime, rewindSeconds = ROLLBACK_SECONDS) {
@@ -1983,6 +2038,46 @@ is already reached. `popup.js` matches on that substring to distinguish a cap re
 rejection; only the cap case shows the CP-65 inline message (`.pin-cap-message`, positioned over the
 control's usual spot, auto-removed after 2.5s via `setTimeout`) — any other error just logs a warning,
 matching the existing failure-matrix convention (§7.2).
+
+**Completion display and Remove Completed (v4 Phase 7, D-104/D-105/D-117/D-180/D-181):**
+
+Each row computes `storageValidation.isCompleteEntry(entry)` once. When true, `.row-meta` renders
+CP-77 (`Completed`), replacing the entire meta line — never just the percent segment. When false, the
+meta line's percentage is computed separately from the thumbnail's proportional fill bar
+(`barPercent`, uncapped — a visual proportion, not a textual claim) and capped at 99
+(`Math.min(99, Math.round(...))`, D-117): a row never reads "100% watched" from playhead/rounding
+alone.
+
+`popup.js` keeps two parallel maps alongside the DOM, populated at initial render: `entriesById`
+(`videoId → entry`, for recomputing the live Remove-completed count without a storage re-read) and
+`rowsById` (`videoId → <li>`, so a batch removal can find each row directly rather than a
+`CSS.escape`'d attribute-selector query — the sandboxed harness's fake DOM has no `CSS` global, and
+the direct-map approach is also simply cheaper).
+
+`refreshRemoveCompletedUI()` recomputes the matching count from `entriesById` against the current
+`#include-pinned-checkbox` state (pinned entries excluded unless checked) and re-renders
+`#remove-completed-btn`/`#remove-completed-count`: zero matches disables the button and shows CP-74
+in place of the count (D-119); a nonzero count enables it and shows CP-69 (plural) or CP-70
+(singular), mirroring the header count's own convention. Called after initial render and after every
+local mutation that can change the matching set (pin toggle, single-row remove, the checkbox itself
+changing, and after a Remove-completed commit).
+
+Clicking `#remove-completed-btn` (only enabled at count ≥1) reuses the same inline-confirmation
+pattern as `#clear-btn`/`#reset-btn` (§4.10): the button/count/checkbox are hidden, a confirm panel
+naming the same count (CP-71/CP-72, `{countLabel}` reusing CP-69/70 verbatim so the number in the
+confirmation always matches the preview) replaces them in place. Confirming calls
+`storageManager.removeCompleted(includePinnedCheckbox.checked)` — the writer re-derives the actual
+removal set server-side (§4.6a), so what's removed is whatever matches at commit time, not a snapshot
+taken when the button was clicked. On resolution, each `removedId` (from the writer's response, not a
+locally-recomputed guess) is used to look up and remove its row via `rowsById`, decrement counts, and
+call `updateCount`/`refreshRemoveCompletedUI()` — list, count, and focus (D-123's narrower
+remove-completed-specific case: focus returns to the button, or is left alone if the button is now
+disabled) all update only after the writer's acknowledgement, never optimistically. Cancelling
+restores the controls untouched.
+
+The include-pinned checkbox (CP-73) is a plain unchecked-by-default HTML checkbox with no persistence
+layer of its own — it naturally resets on every popup open (D-118) since nothing writes its state
+anywhere.
 
 ### 4.12 `debugLogger.js`
 

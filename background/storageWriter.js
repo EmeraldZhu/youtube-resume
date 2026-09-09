@@ -154,7 +154,7 @@ importScripts('../storage/storageValidation.js');
   // outcome (client retry, 2.7) is always safe.
   // -----------------------------------------------------------------
 
-  async function handleSaveProgress({ videoId, time, duration, title, channel, sessionId, lastActiveAt, explicitUserSeek, trigger }) {
+  async function handleSaveProgress({ videoId, time, duration, title, channel, sessionId, lastActiveAt, explicitUserSeek, trigger, ended }) {
     if (!isValidVideoId(videoId)) {
       const message = `saveProgress rejected: unresolved videoId (${JSON.stringify(videoId)})`;
       console.warn('[YTResume]', message);
@@ -206,6 +206,11 @@ importScripts('../storage/storageValidation.js');
     // sole identity for a stored entry. A save never changes an existing
     // entry's pinned state.
     if (existing?.pinned) entry.pinned = true;
+
+    // ended (v4 Phase 7, D-104): sticky once true, same OR/preserve
+    // semantics as pinned — a later save (e.g. a replay from the start)
+    // must not erase a previously-recorded genuine completion.
+    if (ended || existing?.ended) entry.ended = true;
 
     store[videoId] = entry;
 
@@ -263,6 +268,44 @@ importScripts('../storage/storageValidation.js');
     await chrome.storage.local.set({ [STORAGE_KEY]: store });
   }
 
+  /**
+   * Roadmap 7.5/7.6, D-105 — one coordinated batch mutation. The matching
+   * set is derived here, against current storage, at commit time: never a
+   * client-supplied id list (T7.4's concurrent-playback case, T7.5's
+   * mid-batch-failure case both need this to be a single atomic
+   * read-modify-write like every other mutation here, not a sequence of
+   * per-id DELETE_PROGRESS commands that could interleave with an
+   * unrelated write). Pinned entries are excluded unless includePinned is
+   * true (§6.3 "Remove Completed" — pinning already means "keep this").
+   * Each removed id also bumps deletionRevisionAt (7.6/Roadmap 3.4), the
+   * same mechanism handleDeleteProgress uses, so an open, unchanged tab for
+   * a just-removed completed video doesn't recreate the row on its next
+   * passive lifecycle event.
+   */
+  async function handleRemoveCompleted({ includePinned }) {
+    const result = await chrome.storage.local.get(STORAGE_KEY);
+    const store = result[STORAGE_KEY] ?? {};
+    const removedIds = [];
+
+    for (const [key, entry] of Object.entries(store)) {
+      if (!isPlainObject(entry)) continue;
+      if (!includePinned && entry.pinned) continue;
+      if (storageValidation.isCompleteEntry(entry)) removedIds.push(key);
+    }
+
+    if (removedIds.length === 0) {
+      return { removedCount: 0, removedIds: [] };
+    }
+
+    removedIds.forEach((id) => delete store[id]);
+    await chrome.storage.local.set({ [STORAGE_KEY]: store });
+
+    const now = Date.now();
+    removedIds.forEach((id) => deletionRevisionAt.set(id, now));
+
+    return { removedCount: removedIds.length, removedIds };
+  }
+
   async function handleClearAll() {
     await chrome.storage.local.remove(STORAGE_KEY);
     // Roadmap 3.4 — same reasoning as handleDeleteProgress, applied to
@@ -291,6 +334,7 @@ importScripts('../storage/storageValidation.js');
       case 'DELETE_PROGRESS': return handleDeleteProgress(payload);
       case 'PIN': return handlePin(payload);
       case 'UNPIN': return handleUnpin(payload);
+      case 'REMOVE_COMPLETED': return handleRemoveCompleted(payload);
       case 'CLEAR_ALL': return handleClearAll();
       case 'SET_SETTINGS': return handleSetSettings(payload);
       case 'RESET_SETTINGS': return handleResetSettings();

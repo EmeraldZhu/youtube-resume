@@ -160,6 +160,7 @@ function loadExtension(opts = {}) {
     warnings,
     logs,
     // Convenience accessors, populated after exportCode ran above.
+    storageValidation: context.storageValidation,
     storageManager: context.storageManager,
     debugLogger: context.debugLogger,
     youtubeUtils: context.youtubeUtils,
