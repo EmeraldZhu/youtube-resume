@@ -60,7 +60,10 @@ function buildPopupDom(document) {
   emptyStateEl.classList.add('hidden');
   const loadFailureEl = el(document, 'div', 'load-failure-state');
   loadFailureEl.classList.add('hidden');
+  // v4 Phase 8, 8.9 — dedicated list/count-change announcement region.
+  const listAnnouncerEl = el(document, 'div', 'list-announcer');
   viewList.appendChild(countEl);
+  viewList.appendChild(listAnnouncerEl);
   viewList.appendChild(listEl);
   viewList.appendChild(emptyStateEl);
   viewList.appendChild(loadFailureEl);
@@ -116,8 +119,8 @@ function buildPopupDom(document) {
   viewSettings.appendChild(resetConfirmPanel);
 
   return {
-    listEl, emptyStateEl, loadFailureEl, clearBtn, countEl,
-    removeCompletedBtn, removeCompletedCountEl, includePinnedCheckbox,
+    listEl, emptyStateEl, loadFailureEl, clearBtn, countEl, listAnnouncerEl,
+    settingsBtn, removeCompletedBtn, removeCompletedCountEl, includePinnedCheckbox,
     removeCompletedConfirmPanel, removeCompletedBodyEl,
     removeCompletedCancelBtn, removeCompletedConfirmBtn,
   };
@@ -148,12 +151,19 @@ function loadPopup(opts = {}) {
 
   const sandbox = {
     console: fakeConsole,
-    chrome: { storage: { local: chromeStorage.local }, runtime: fakeRuntime.runtime },
+    chrome: {
+      storage: { local: chromeStorage.local, onChanged: chromeStorage.onChanged },
+      runtime: fakeRuntime.runtime,
+    },
     importScripts: () => {},
     document,
     window,
     setTimeout: clock.setTimeout,
     clearTimeout: clock.clearTimeout,
+    // v4 Phase 8 — popup.js's live-reconciliation announcer uses rAF to
+    // force screen-reader re-announcement; not real animation timing here.
+    requestAnimationFrame: (fn) => clock.setTimeout(fn, 0),
+    cancelAnimationFrame: (id) => clock.clearTimeout(id),
     Date: { now: () => clock.now() },
   };
 

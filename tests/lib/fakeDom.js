@@ -47,6 +47,39 @@ class FakeElement {
     // plain elements since nothing reads them unless set.
   }
 
+  // v4 Phase 8, 8.7 — popup.js's row-removal focus handoff walks sibling
+  // rows via these; only element-vs-element adjacency matters here (this
+  // fake tree never mixes in text nodes), so nextElementSibling/
+  // previousElementSibling and firstChild/nextSibling coincide.
+  get nextElementSibling() {
+    if (!this.parentNode) return null;
+    const idx = this.parentNode.children.indexOf(this);
+    return idx >= 0 && idx + 1 < this.parentNode.children.length ? this.parentNode.children[idx + 1] : null;
+  }
+  get previousElementSibling() {
+    if (!this.parentNode) return null;
+    const idx = this.parentNode.children.indexOf(this);
+    return idx > 0 ? this.parentNode.children[idx - 1] : null;
+  }
+  get nextSibling() { return this.nextElementSibling; }
+  get firstChild() { return this.children.length ? this.children[0] : null; }
+
+  // v4 Phase 8, 8.7 — matches real Chrome: setting .disabled = true on the
+  // currently-focused element blurs it synchronously (activeElement reverts
+  // to <body>) even though the element is still in the document. This is
+  // NOT cosmetic — it's what a live-testing pass on this phase found: code
+  // that captures document.activeElement only after disabling a button (to
+  // guard against a double-click) always reads <body>, never the button.
+  // Modeling it here means that class of bug is caught by this harness too,
+  // not only by a real browser.
+  get disabled() { return !!this._disabled; }
+  set disabled(v) {
+    this._disabled = !!v;
+    if (this._disabled && this.ownerDocument && this.ownerDocument.activeElement === this) {
+      this.ownerDocument.activeElement = this.ownerDocument.body;
+    }
+  }
+
   get className() { return this.classList.value; }
   set className(v) {
     this.classList = new ClassList(this);
@@ -96,6 +129,15 @@ class FakeElement {
       this.children.splice(idx, 1);
       child.parentNode = null;
       notifyMutation(this);
+      // Real DOM: removing the focused element (or an ancestor of it) blurs
+      // it immediately, resetting activeElement — popup.js's pin-resort
+      // refocus (v4 Phase 8, 8.7) depends on this actually happening so the
+      // explicit re-focus call after re-insertion is provably necessary,
+      // not a no-op in this harness.
+      const doc = child.ownerDocument;
+      if (doc && doc.activeElement && child.contains(doc.activeElement)) {
+        doc.activeElement = doc.body;
+      }
     }
     return child;
   }
@@ -104,7 +146,30 @@ class FakeElement {
     if (this.parentNode) this.parentNode.removeChild(this);
   }
 
-  focus() {} // no-op — no source under test reads focus state, only calls .focus()
+  replaceChildren(...nodes) {
+    [...this.children].forEach((c) => this.removeChild(c));
+    nodes.forEach((n) => this.appendChild(n));
+  }
+
+  /** Self-or-descendant containment check, matching real Node.contains(). */
+  contains(node) {
+    let n = node;
+    while (n) {
+      if (n === this) return true;
+      n = n.parentNode;
+    }
+    return false;
+  }
+
+  focus() {
+    // v4 Phase 8, 8.7 — matches real Chrome: a disabled element cannot
+    // receive focus at all. Calling .focus() on one is silently a no-op,
+    // not an error and not a fallback to some other element. A live-testing
+    // pass on this phase found code that called .focus() on a control
+    // before re-enabling it, which did nothing in real Chrome.
+    if (this._disabled) return;
+    if (this.ownerDocument) this.ownerDocument.activeElement = this;
+  }
 
   addEventListener(type, fn) {
     if (!this._listeners.has(type)) this._listeners.set(type, new Set());
@@ -249,8 +314,11 @@ function createDocument() {
     body,
     title: '',
     hidden: false,
-    createElement: (tag) => new FakeElement(tag),
-    createElementNS: (_ns, tag) => new FakeElement(tag),
+    // v4 Phase 8, 8.7 — real DOM tracks the focused element here; defaults
+    // to <body>, same as a real document with nothing focused yet.
+    activeElement: body,
+    createElement: (tag) => { const e = new FakeElement(tag); e.ownerDocument = doc; return e; },
+    createElementNS: (_ns, tag) => { const e = new FakeElement(tag); e.ownerDocument = doc; return e; },
     querySelector: (sel) => html.querySelector(sel),
     querySelectorAll: (sel) => html.querySelectorAll(sel),
     getElementById: (id) => html.querySelector(`#${id}`),
@@ -270,6 +338,8 @@ function createDocument() {
       return true;
     },
   };
+  html.ownerDocument = doc;
+  body.ownerDocument = doc;
   return doc;
 }
 

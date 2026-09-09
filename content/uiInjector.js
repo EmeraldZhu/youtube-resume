@@ -15,7 +15,16 @@ const uiInjector = (() => {
   let dismissTimer = null;
   let toastElement = null;
   let toastTimeout = null;
+  let toastRAF = null;
+  // Toast generation identity (v4 Phase 8, 8.11/F19, same cancellation
+  // contract as Phase 4's generation tokens): every timer/rAF callback
+  // captures the generation it was scheduled for and checks it's still
+  // current before touching anything, so an old, superseded toast's timer
+  // can never remove or reschedule work for a newer toast that replaced it
+  // in the same tick before the old one's rAF ever fired.
+  let toastGeneration = 0;
   const DISMISS_DELAY_MS = 7000; // 7 seconds, within the 5–10s spec range
+  const reducedMotion = !!(window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches);
 
   /**
    * Formats a time in seconds to m:ss or h:mm:ss.
@@ -121,7 +130,8 @@ const uiInjector = (() => {
    * @param {number} resumeTime — the seek target in seconds
    */
   function showToast(resumeTime) {
-    removeToast(); // Remove any existing toast first
+    removeToast(); // Remove any existing toast first, cancelling its pending rAF/timers
+    const generation = ++toastGeneration;
 
     const toast = document.createElement('div');
     toast.id = 'yt-resume-toast';
@@ -144,7 +154,10 @@ const uiInjector = (() => {
       zIndex:         '99',
       pointerEvents:  'none',
       opacity:        '0',
-      transition:     'opacity 200ms ease-out',
+      // D-124 — prefers-reduced-motion keeps the same ~2200ms total timing
+      // budget but shows/removes the toast at full opacity instantly rather
+      // than animating the transition itself.
+      transition:     reducedMotion ? 'none' : 'opacity 200ms ease-out',
     });
 
     // Inject into the player container
@@ -166,18 +179,28 @@ const uiInjector = (() => {
     toastElement = toast;
 
     // Animation: fade-in → hold → fade-out → remove
-    // Trigger fade-in on next frame (allows the browser to register opacity: 0 first)
-    requestAnimationFrame(() => {
+    // Trigger fade-in on next frame (allows the browser to register opacity: 0 first).
+    // The rAF handle is retained and cancelled by removeToast() (F19), and every
+    // callback below re-checks `generation` against the module's current
+    // toastGeneration before touching shared state or scheduling more work —
+    // if a newer showToast() call has already run, this chain is a no-op from
+    // here on, so it can never remove or reschedule the newer toast's own timers.
+    toastRAF = requestAnimationFrame(() => {
+      toastRAF = null;
+      if (generation !== toastGeneration) return;
       toast.style.opacity = '1';
 
       // Hold for 1600ms after fade-in completes (200ms)
       toastTimeout = setTimeout(() => {
-        // Switch to fade-out easing
-        toast.style.transition = 'opacity 400ms ease-in';
+        if (generation !== toastGeneration) return;
+        // Switch to fade-out easing (skipped visually under reduced motion,
+        // D-124, but the same total timing budget is kept either way)
+        if (!reducedMotion) toast.style.transition = 'opacity 400ms ease-in';
         toast.style.opacity = '0';
 
         // Remove from DOM after fade-out completes
         toastTimeout = setTimeout(() => {
+          if (generation !== toastGeneration) return;
           removeToast();
         }, 400);
       }, 200 + 1600); // 200ms fade-in + 1600ms hold
@@ -203,6 +226,10 @@ const uiInjector = (() => {
    * Removes the toast from the DOM and clears its timeout.
    */
   function removeToast() {
+    if (toastRAF !== null) {
+      cancelAnimationFrame(toastRAF);
+      toastRAF = null;
+    }
     if (toastTimeout !== null) {
       clearTimeout(toastTimeout);
       toastTimeout = null;

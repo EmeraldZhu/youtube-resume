@@ -25,6 +25,9 @@
  *   storageManager.saveSettings(partial)   → Promise<Settings>
  *   storageManager.resetSettings()         → Promise<Settings>
  *   storageManager.getDefaultSettings()    → Settings (sync, no storage access)
+ *   storageManager.subscribeProgress(cb)   → unsubscribe fn (v4 Phase 8 — cb
+ *     receives the full sanitized videoId -> VideoProgress map on every
+ *     acknowledged youtubeResume write, from any context, including this one)
  *
  * Types:
  *   VideoProgress = { time: number, duration: number, updated: number, title?: string, channel?: string, pinned?: boolean, ended?: boolean }
@@ -214,6 +217,32 @@ const storageManager = (() => {
     return { ...DEFAULT_SETTINGS };
   }
 
+  /**
+   * Subscribes to live changes to the youtubeResume store (v4 Phase 8,
+   * 8.1/F16/F17) via chrome.storage.onChanged — this fires for every write
+   * through storageWriter.js, including ones made from this same popup
+   * instance, so it is the single source of "acknowledged state" callers
+   * should reconcile UI against instead of an optimistic local increment.
+   * `callback` receives the full sanitized videoId -> VideoProgress map
+   * (same shape as getAllProgress()'s resolution), never a diff — the
+   * caller does its own before/after comparison. Returns an unsubscribe
+   * function.
+   */
+  function subscribeProgress(callback) {
+    assertStorageAvailable();
+    function listener(changes, areaName) {
+      if (areaName !== 'local' || !changes[STORAGE_KEY]) return;
+      const raw = changes[STORAGE_KEY].newValue ?? {};
+      const sanitized = {};
+      for (const [key, entry] of Object.entries(raw)) {
+        if (isPlainObject(entry)) sanitized[key] = sanitizeEntry(entry);
+      }
+      callback(sanitized);
+    }
+    chrome.storage.onChanged.addListener(listener);
+    return () => chrome.storage.onChanged.removeListener(listener);
+  }
+
   // ---------------------------------------------------------------------
   // Mutations — thin message clients. Each keeps its exact prior signature
   // and Promise contract; the actual read-modify-write now happens once,
@@ -377,5 +406,6 @@ const storageManager = (() => {
     saveSettings,
     resetSettings,
     getDefaultSettings,
+    subscribeProgress,
   };
 })();

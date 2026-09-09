@@ -453,6 +453,7 @@ Clicking the extension icon opens a panel listing saved videos, newest first.
 - Empty state is shown when nothing is saved
 - The header shows the saved count, an icon-only Ko-fi support link, and a control to open settings
 - Rendering completes in under 200ms with a full 200 entries; thumbnails may load progressively but must not block the list
+- While the panel stays open, it stays live *(new in v4.0)*: a video's progress updating elsewhere, an entry being evicted, or another window's action all reflect in the open list without the user needing to reopen it. Turning thumbnails off applies immediately to already-rendered rows, not only on next open
 
 **Thumbnails:**
 - Loaded from YouTube's public image CDN at `https://i.ytimg.com/vi/{videoId}/mqdefault.jpg`

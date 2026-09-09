@@ -13,7 +13,9 @@ const { loadExtension } = require('../lib/harness');
  * case now asserts arity 6 for saveProgress specifically rather than
  * flagging the intentional change as a regression. Phase 7 (Roadmap 7.5,
  * D-105) adds one wholly new export, removeCompleted — also intentional,
- * asserted here rather than treated as drift.
+ * asserted here rather than treated as drift. Phase 8 (8.1) adds a second
+ * new export, subscribeProgress, for the popup's live storage-change
+ * reconciliation — same treatment.
  */
 const EXPECTED_API = {
   getProgress: 1,
@@ -28,6 +30,7 @@ const EXPECTED_API = {
   saveSettings: 1,
   resetSettings: 0,
   getDefaultSettings: 0,
+  subscribeProgress: 1,
 };
 
 module.exports = {

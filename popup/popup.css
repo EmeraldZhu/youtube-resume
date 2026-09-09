@@ -604,6 +604,31 @@ a {
   z-index: 2;
 }
 
+/* Screen-reader-only live region (v4 Phase 8, 8.9) — visually hidden but
+   still reachable by assistive tech, standard clip-based technique. */
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
+
+/* v4 Phase 8, 8.10 — respect prefers-reduced-motion for every decorative
+   CSS transition in the popup (toggle thumb slide, hover-reveal fades,
+   segment/button color transitions). Content changes still apply
+   immediately; only the animated transition itself is removed. */
+@media (prefers-reduced-motion: reduce) {
+  * {
+    transition-duration: 0.001ms !important;
+    animation-duration: 0.001ms !important;
+  }
+}
+
 /* Empty state */
 .empty-state {
   padding: 48px 24px;

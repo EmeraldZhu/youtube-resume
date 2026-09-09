@@ -50,6 +50,7 @@
 | C19 | Turning thumbnails off specified to apply immediately to already-rendered rows within the same popup session, with an explicit boundary for requests already in flight | §6.4 |
 | C20 | Accessibility: focus handoff on row removal/pin re-sort/confirmation open-cancel, programmatic setting-group-label association, list-count-change announcement, `prefers-reduced-motion` support | §8 |
 | C21 | Copy IDs CP-68 through CP-79 added | §7.3, §7.4 |
+| C22 | Row pin/remove `aria-label`s and the list announcer now identify the specific video by title rather than a generic name (F17); copy IDs CP-80 through CP-84 added, retiring CP-36/CP-62/CP-63 | §7.3 |
 
 ---
 
@@ -425,8 +426,8 @@ the product's actual answer to "the resume failed."
 | Title | Two lines maximum, ellipsis overflow. Falls back to CP-37 |
 | Channel name | One line, ellipsis overflow, muted. Omitted entirely (no placeholder) when not yet captured |
 | Meta line | CP-34 and CP-35 — `{position} / {duration} · {percent}% watched`. **Percentage is capped at 99%** unless the completion marker is present (see "Completion Display" below) — a row never reads "100% watched" from playhead position alone |
-| **Pin control** *(v3.0)* | Inline SVG icon button, positioned in the row's action area immediately to the left of the remove control (`📌 ✕` reading order). Revealed on row hover, like the remove control — but see the note below on the persistent pinned badge, which is what signals pinned state without hovering. Always keyboard-focusable. Outline glyph when unpinned; filled glyph when pinned. `aria-pressed="true"`/`"false"` reflects state; `aria-label` switches between CP-62 (unpinned → "Pin this video") and CP-63 (pinned → "Unpin this video") |
-| Remove control | `✕`, revealed on row hover, always keyboard-focusable |
+| **Pin control** *(v3.0; labels updated v4.0, F17)* | Inline SVG icon button, positioned in the row's action area immediately to the left of the remove control (`📌 ✕` reading order). Revealed on row hover, like the remove control — but see the note below on the persistent pinned badge, which is what signals pinned state without hovering. Always keyboard-focusable. Outline glyph when unpinned; filled glyph when pinned. `aria-pressed="true"`/`"false"` reflects state; `aria-label` switches between CP-80 (unpinned → "Pin {title}") and CP-81 (pinned → "Unpin {title}") |
+| Remove control | `✕`, revealed on row hover, always keyboard-focusable. `aria-label` is CP-82 (v4.0, F17 — "Remove {title} from saved videos") |
 | Whole-row target | `<a href="https://www.youtube.com/watch?v={id}" target="_blank" rel="noopener noreferrer">` |
 
 **Pinned state is visible without hovering** via the thumbnail's persistent pinned badge above; the
@@ -807,7 +808,7 @@ The single source of truth for all user-facing text.
 > **CP-64 intentionally skipped.** Reserved during drafting for the pinned-state thumbnail badge's
 > `aria-label`, but the shipped badge is a passive `aria-hidden="true"` glyph (Row Specification
 > table, §6.3) — the row's pin control already announces pinned/unpinned state via its own
-> `aria-pressed`/`aria-label` (CP-62/CP-63), so a second announcement on the badge would be
+> `aria-pressed`/`aria-label` (CP-80/CP-81, v4.0), so a second announcement on the badge would be
 > redundant. Not retired (§7.5) since it was never assigned copy; do not reuse.
 
 **Remove completed and related states, added in v4.0:**
@@ -825,6 +826,23 @@ The single source of truth for all user-facing text.
 | CP-76 | Load-failure state body | `Something went wrong reading your saved videos. Try reopening the popup.` |
 | CP-77 | Row — completed-row label, replaces the percentage meta line | `Completed` |
 | CP-79 | Remove-completed confirm button | `Remove` |
+
+**Row action labels and list announcements, added in v4.0 (F17):**
+
+| ID | Element | Copy |
+|---|---|---|
+| CP-80 | Row — pin control `aria-label`, unpinned state — supersedes CP-62 | `Pin {title}` |
+| CP-81 | Row — pin control `aria-label`, pinned state — supersedes CP-63 | `Unpin {title}` |
+| CP-82 | Row — remove control `aria-label` — supersedes CP-36 | `Remove {title} from saved videos` |
+| CP-83 | List announcer — one row removed | `{title} removed. {count}.` (`{count}` is CP-38/CP-39's rendered text, e.g. "2 saved videos") |
+| CP-84 | List announcer — multiple rows removed (batch action) | `{n} videos removed. {count}.` |
+
+> A row action now identifies the specific video by title (falling back to CP-37, `Untitled video`,
+> the same as the row's own visible text) instead of a generic "this video"/no-name label — F17
+> required this; CP-36/CP-62/CP-63's static wording could not express it, so these are new IDs, not
+> reworded existing ones. The list announcer (`role="status"`/`aria-live="polite"`, distinct from the
+> per-row pin-cap/confirmation regions) also announces a plain count change with no removal — CP-38/
+> CP-39's own rendered text plus a trailing period, not a separate ID.
 
 ### 7.4 Popup — Settings View *(new in v2.0)*
 
@@ -883,6 +901,8 @@ The single source of truth for all user-facing text.
 | CP-14, CP-15 | `Saved videos` / `{n}` | Superseded by CP-38 and CP-39 |
 | CP-16 to CP-20 | v1.0 clear action copy | Superseded by CP-48 to CP-52 |
 | CP-21 to CP-25 | v1.0 support and cross-promo copy | Superseded by CP-56 to CP-60 |
+| CP-36 | `Remove from saved videos` | Superseded by CP-82 — row actions now identify the specific video (F17) |
+| CP-62, CP-63 | `Pin this video` / `Unpin this video` | Superseded by CP-80/CP-81 — same reason |
 
 > Retired IDs must not be reused. Any string still matching a retired ID in shipped code is a defect.
 
@@ -912,13 +932,13 @@ The single source of truth for all user-facing text.
 | Requirement | Implementation |
 |---|---|
 | Row navigation | Every row reachable by Tab; Enter opens the video |
-| Remove control | Keyboard-focusable even though revealed on hover; never hover-only |
-| Pin control *(v3.0)* | Keyboard-focusable even though revealed on hover; never hover-only. `aria-pressed` reflects state; `aria-label` announces the action that will result (CP-62/CP-63), not just a static name |
+| Remove control | Keyboard-focusable even though revealed on hover; never hover-only. `aria-label` identifies the specific video (CP-82, v4.0, F17), not a generic name |
+| Pin control *(v3.0)* | Keyboard-focusable even though revealed on hover; never hover-only. `aria-pressed` reflects state; `aria-label` announces the action that will result and identifies the specific video (CP-80/CP-81, v4.0, F17), not a generic name |
 | Pinned badge *(v3.0)* | `aria-hidden="true"` — decorative once the pin control's own accessible name already conveys state; not a duplicate announcement |
 | Pin limit message *(v3.0)* | Visually inserted inline (CP-65) where the pin control sat, auto-removed after ~2.5s. Announced via `role="status"`/`aria-live="polite"` — see D-097 |
 | Thumbnails | `alt=""` — decorative; the adjacent title carries the meaning |
-| Settings controls | Segmented groups use `role="radiogroup"` with `aria-checked`; toggles use `role="switch"` |
-| Setting helper text | Associated with its control via `aria-describedby` |
+| Settings controls | Segmented groups are `role="group"` (each segment a toggle `<button>` with `aria-pressed`, not a radio); toggles use `role="switch"` |
+| Setting helper text | Associated with its segmented group via `aria-describedby` |
 | View change | Moving between list and settings sets focus to the new view's header |
 | Confirmation copy | Inline pattern, announced via `aria-live="polite"` |
 | Colour not sole signal | Progress conveyed by both bar and text percentage |
@@ -926,7 +946,7 @@ The single source of truth for all user-facing text.
 | Focus on row removal *(v4.0, F18)* | Moves to the next row's equivalent control (or, if the removed row was last, the previous row's); if the list becomes empty, focus moves to the header's Remove-completed button or, failing that, the settings gear |
 | Focus during pin re-sort *(v4.0, F18)* | The pin control retains focus across its DOM move when the row re-sorts to the pinned/unpinned boundary — detach-and-reinsert must not drop focus to `<body>` |
 | Focus on confirmation open/cancel *(v4.0, F18)* | Opening any inline confirmation (Remove completed, Clear saved progress, Reset to defaults) moves focus to its Cancel control; cancelling restores focus to the control that opened it (the button now back in its normal state) |
-| Setting-group label association *(v4.0, F18)* | Each segmented control's visible label is programmatically associated via `aria-labelledby` on the `role="radiogroup"` container — not a visual-only span |
+| Setting-group label association *(v4.0, F18)* | Each segmented group's visible label is programmatically associated via `aria-labelledby` on its `role="group"` container — not a visual-only span |
 | List count changes *(v4.0, F18)* | The header count (CP-38/CP-39) and the Remove-completed live count (CP-69/CP-70) live inside a `role="status"`/`aria-live="polite"` region so a count change is announced without moving focus |
 | Reduced motion *(v4.0, F18)* | Every decorative transition in the popup (inline-confirmation swap, pin-limit-message auto-dismiss fade) respects `prefers-reduced-motion: reduce` by showing/hiding instantly instead of animating. The in-player toast's own fade is covered separately in §5.5 |
 

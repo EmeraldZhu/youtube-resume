@@ -1784,6 +1784,19 @@ function cleanup() {
 - If `.ytp-time-display` is not found, log warning and exit without injecting — resume still occurred
 - `cleanup()` is idempotent; safe to call multiple times
 
+#### Toast cancellation contract (v4 Phase 8, 8.11/F19)
+
+`showToast()`'s `requestAnimationFrame` handle is retained (`toastRAF`) and cancelled by
+`removeToast()`, the same way `toastTimeout` already was — before this fix, only the `setTimeout`
+chain was cancelled, so a superseded toast's still-pending rAF callback could fire later and touch
+whatever toast happened to be current by then. Every scheduled callback (the rAF, and both chained
+`setTimeout`s) also captures a `generation` number (`++toastGeneration`, module-scoped) at schedule
+time and checks it against the current `toastGeneration` before doing anything — the same
+cancellation contract Phase 4 established for navigation generations, applied here to toast
+lifecycles. `showToast()` also respects `prefers-reduced-motion` (D-124): the same ~2200ms total
+show/hide schedule runs either way, but the CSS `transition` is skipped so the toast appears/
+disappears instantly rather than animating.
+
 ---
 
 ### 4.8 `youtubeUtils.js`
@@ -2016,6 +2029,43 @@ already-fetched object and appended in a single pass, with thumbnails loading pr
 **Ko-fi link (D-058):** a static `<a class="kofi-btn">` in `popup.html`'s header, not built by
 `popup.js` — no dynamic state, so no reason to construct it at runtime. Inline `<svg>` markup in the
 HTML source is not the `innerHTML` API and doesn't trip T8.13's grep.
+
+**Live storage reconciliation (v4 Phase 8, 8.1, F16/F17):** the once-per-open snapshot above is only
+the initial render. `storageManager.subscribeProgress(callback)` wraps `chrome.storage.onChanged`,
+firing for every acknowledged `youtubeResume` write — including this popup's own — with the full
+sanitized `videoId -> VideoProgress` map. `reconcile(newStore)` diffs it against `entriesById`: a
+missing id is removed (with focus handoff, below); a new id is inserted at its sorted position; a
+changed id is updated **in place** (duration badge, progress fill, meta line) without moving the row
+or touching focus — only an actual `pinned` flip re-sorts, since ordinary progress ticks from an open
+YouTube tab must not disturb scroll position (T8.2). Every counter (`entryCount`, `pinnedCount`, the
+Remove-completed live count) is recomputed fresh from `newStore` on each reconcile — never an
+optimistic local increment — so a rapid double-click or an overlapping batch action can't produce a
+negative or phantom count (8.2/8.3).
+
+**Coalesced per-row actions (8.2/8.3):** a row's pin/remove `<button>` is disabled synchronously the
+instant its own click handler starts, and a second click while `rowPending` still holds that videoId
+is a no-op. `batchInFlight` (set for the duration of "Remove completed"/"Clear all") disables every
+row's controls, so an individual row action can never race a batch mutation in the UI. Both guards are
+UI-only — `background/storageWriter.js`'s serialized queue is what actually guarantees storage-level
+correctness regardless.
+
+**Focus handling gotcha (8.7, found via live `chrome-devtools-mcp` testing, not just the harness):**
+disabling a button that currently holds focus blurs it in real Chrome — synchronously enough that by
+the time the acknowledged write's `reconcile()` call runs, `document.activeElement` has already
+reverted to `<body>`. A live re-check at that point can never see which control the user actually
+acted on. `captureFocusIntent(li, videoId)` records `'pin'|'remove'` **before** the row's controls are
+disabled, and `reconcile()`/`removeRow()` consult that captured intent instead of a live check for this
+popup's own actions (an externally-caused change, which never disabled anything here, still uses a
+live check — accurate for that case). A second gotcha compounds the first: `.focus()` on a still-
+disabled element is a no-op in real Chrome, so the row's controls must be re-enabled **before** any
+`.focus()` call runs, not after. `tests/lib/fakeDom.js` models both behaviors (disabling the focused
+element blurs it; `.focus()` on a disabled element is a no-op) specifically so this class of bug is
+caught by `node tests/run.js` too, not only a live browser.
+
+**Programmatic label association (8.8):** each `.segmented` `role="group"` carries
+`aria-labelledby` pointing at its visible `<span class="setting-label">` and `aria-describedby`
+pointing at its `<p class="setting-helper">` — both by `id`, in `popup.html`, not constructed at
+runtime.
 
 **Pin control and sort (v3 — Phase 5, D-077/D-078):** each row carries `data-pinned`/`data-updated`
 attributes mirroring its `pinned`/`updated` fields. The list is built once, sorted two-tier (pinned

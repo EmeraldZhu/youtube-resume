@@ -49,6 +49,11 @@
 
       <hr class="divider">
 
+      <!-- v4 Phase 8, 8.9: dedicated announcement region for list/count
+           changes (row removed, external addition/removal, batch actions),
+           distinct from each row's own pin-cap/confirm-panel aria-live. -->
+      <div id="list-announcer" class="sr-only" role="status" aria-live="polite"></div>
+
       <div class="list-region" id="list-region">
         <ul class="video-list" id="video-list"></ul>
 
@@ -74,40 +79,40 @@
       <hr class="divider">
 
       <div class="section setting-block">
-        <span class="setting-label">Minimum watch time</span>
-        <div class="segmented" data-setting="minWatchSeconds">
+        <span class="setting-label" id="label-minWatchSeconds">Minimum watch time</span>
+        <div class="segmented" data-setting="minWatchSeconds" role="group" aria-labelledby="label-minWatchSeconds" aria-describedby="desc-minWatchSeconds">
           <button type="button" class="segment" data-value="10">10s</button>
           <button type="button" class="segment" data-value="30">30s</button>
           <button type="button" class="segment" data-value="60">1m</button>
           <button type="button" class="segment" data-value="120">2m</button>
         </div>
-        <p class="setting-helper">Don't save or resume videos watched for less than this.</p>
+        <p class="setting-helper" id="desc-minWatchSeconds">Don't save or resume videos watched for less than this.</p>
       </div>
 
       <hr class="divider">
 
       <div class="section setting-block">
-        <span class="setting-label">Treat as finished at</span>
-        <div class="segmented" data-setting="completionThreshold">
+        <span class="setting-label" id="label-completionThreshold">Treat as finished at</span>
+        <div class="segmented" data-setting="completionThreshold" role="group" aria-labelledby="label-completionThreshold" aria-describedby="desc-completionThreshold">
           <button type="button" class="segment" data-value="0.9">90%</button>
           <button type="button" class="segment" data-value="0.95">95%</button>
           <button type="button" class="segment" data-value="0.98">98%</button>
           <button type="button" class="segment" data-value="1">Only at the end</button>
         </div>
-        <p class="setting-helper">Videos watched past this point won't resume. "Only at the end" waits until the video actually finishes.</p>
+        <p class="setting-helper" id="desc-completionThreshold">Videos watched past this point won't resume. "Only at the end" waits until the video actually finishes.</p>
       </div>
 
       <hr class="divider">
 
       <div class="section setting-block">
-        <span class="setting-label">Rewind on resume</span>
-        <div class="segmented" data-setting="rewindSeconds">
+        <span class="setting-label" id="label-rewindSeconds">Rewind on resume</span>
+        <div class="segmented" data-setting="rewindSeconds" role="group" aria-labelledby="label-rewindSeconds" aria-describedby="desc-rewindSeconds">
           <button type="button" class="segment" data-value="0">Off</button>
           <button type="button" class="segment" data-value="2">2s</button>
           <button type="button" class="segment" data-value="5">5s</button>
           <button type="button" class="segment" data-value="10">10s</button>
         </div>
-        <p class="setting-helper">Start slightly before where you left off.</p>
+        <p class="setting-helper" id="desc-rewindSeconds">Start slightly before where you left off.</p>
       </div>
 
       <hr class="divider">

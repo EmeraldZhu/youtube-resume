@@ -21,16 +21,16 @@ Phases 4–9 are still planning only.
 | 5 | Verified Resume Outcomes | DONE | — |
 | 6 | Deferred Recovery Lifecycle | AWAITING VERIFICATION | — |
 | 7 | Completion Policy & Remove Completed | AWAITING VERIFICATION | — |
-| 8 | Popup Reconciliation & Accessibility | NOT STARTED | — |
+| 8 | Popup Reconciliation & Accessibility | AWAITING VERIFICATION | — |
 | 9 | Regression, Docs & Store Release | NOT STARTED | — |
 
 Ship gates: **A closed** after Phase 3 (storage correctness — D-144), B after Phase 6 (resume
-reliability), C after Phase 8 (product completeness). Phases 0–3 are independently releasable
-(Roadmap v4 §3). Key decisions logged D-100–D-144 — see `docs/DECISIONS.md` for the full ledger;
+reliability), **C closed** after Phase 8 (product completeness — D-194). Phases 0–3 are independently
+releasable (Roadmap v4 §3). Key decisions logged D-100–D-144 — see `docs/DECISIONS.md` for the full ledger;
 notable: service-worker storage writer (D-102, Phase 2), write-ownership/freshness via the existing
 `updated` field, no schema change (D-139, Phase 3), new additive `youtubeResumeQuarantine` root key
-(D-127), committed `tests/` regression harness (D-108). UX Spec 4.0.0 copy IDs CP-68–CP-79 assigned
-(D-110); CP-80 is next free.
+(D-127), committed `tests/` regression harness (D-108). UX Spec 4.0.0 copy IDs CP-68–CP-84 assigned
+(D-110, Phase 8's CP-80–84 retiring CP-36/62/63); CP-85 is next free.
 
 ## Prior releases (shipped, owner-confirmed DONE)
 
@@ -46,27 +46,22 @@ A phase is `DONE` only when the owner confirms it. Claude Code never writes `DON
 
 ## Next action
 
-Phase 6 AWAITING VERIFICATION (Gate B): deferred recovery lifecycle (visibility/pageshow re-attempt,
-`OUTCOME.DEFERRED`/`PENDING` self-heal, single-observer replacement watch, teardown flush). Self- and
-live-verified (D-168–D-176); full end-to-end recovery/bfcache/freeze-discard not witnessed live —
-sandbox limits, not code defects (D-176).
+**Phase 8 AWAITING VERIFICATION — Gate C closed (D-194).** Popup now subscribes to live storage
+changes and reconciles in place (`storageManager.subscribeProgress`, D-184/D-185); pin/remove
+double-clicks and batch-vs-row races are coalesced (D-186); per-video accessible names, a dedicated
+list announcer, and programmatic settings-group labelling ship (D-191/D-192); thumbnails-off applies
+live (D-193); toast rAF/generation cancellation closes F19 (D-189); reduced motion respected in both
+surfaces (D-190). **Real-Chrome gotcha caught only by live testing (D-187/D-188):** disabling a
+focused button blurs it, and `.focus()` on a disabled element no-ops — broke focus retention/handoff
+until fixed; `tests/lib/fakeDom.js` hardened to catch this class of bug in the node harness too.
+`node tests/run.js` — 58 cases, zero regressions; live-verified via `chrome-devtools-mcp`. Decisions
+D-184–D-194, plus D-123/D-124 moved to DONE.
 
-Phase 7 AWAITING VERIFICATION: completion is now a fact (`ended: boolean`, schema v4, additive;
-D-104), decoupled from the resume cutoff. Legacy inference `floor(time) >= duration-1`
-(`storageValidation.isCompleteEntry`, the one predicate shared by display/resume/removal — D-180).
-Popup caps displayed percent at 99 unless complete (D-117); "Only at the end" is a fourth
-`completionThreshold` segment (sentinel `1`, D-106). "Remove completed" ships in the list header
-(D-116): live count, pinned excluded by default (opt-in checkbox, D-118), inline confirm (CP-71/72),
-one batched `REMOVE_COMPLETED` writer command that re-derives the match set server-side (D-181) and
-integrates deletion-revision (7.6). `meetsMinimumWatched` fixed to inclusive `>=`, matching CP-42h's
-"less than this" (D-179). `pendingSeekToEnd` distinguishes a genuine finish from a seek-to-end for the
-`ended` write (D-178). Self-verified: `node tests/run.js` — 56 cases, zero regressions, 6 new Phase 7
-cases (D-182). **Live-verified via `chrome-devtools-mcp` (D-183):** precondition-wrote a mixed
-5-entry library and drove the real popup — row display, live count, include-pinned toggle,
-confirm/cancel/commit (both scopes), and the "Only at the end" segment all matched exactly; storage
-read back confirmed only the intended rows were removed. Real playback reaching a genuine `ended`
-event was not exercised live (sandbox network limits, D-051/D-060/D-176 precedent) — covered by the
-harness instead. Decisions D-104–D-106, D-116–D-120, D-177–D-183.
+Phase 6 AWAITING VERIFICATION (Gate B): deferred recovery lifecycle — self- and live-verified
+(D-168–D-176); full end-to-end recovery/bfcache/freeze-discard not witnessed live (sandbox limits,
+D-176). Phase 7 AWAITING VERIFICATION: completion is a fact (`ended`, schema v4 additive, D-104),
+"Remove completed" batched/deletion-revision-integrated (D-105/D-181), percent capped at 99 unless
+complete (D-117). Self- and live-verified (D-177–D-183).
 
 ## Doc versions
 

@@ -114,6 +114,7 @@ function loadExtension(opts = {}) {
     setInterval: clock.setInterval,
     clearInterval: clock.clearInterval,
     requestAnimationFrame: (fn) => clock.setTimeout(fn, 16),
+    cancelAnimationFrame: (id) => clock.clearTimeout(id),
     Date: { now: () => clock.now() },
     URL,
     URLSearchParams,
