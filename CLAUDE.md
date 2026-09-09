@@ -27,6 +27,12 @@ popup console, or equivalent), reading logged output — is yours to run and jud
 Only escalate the specific checks that genuinely require the owner's own browser or their visual
 judgment.
 
+**Use `chrome-devtools` MCP before handing anything to the owner.** If a check can be driven live —
+load unpacked, open the popup, click a control, read `chrome.storage.local`, inspect the DOM/console —
+run it yourself via `chrome-devtools` MCP first (D-051/D-052's technique). The owner's checklist is
+for what's left after that: real rendering judgment, or something this tooling's sandboxed network
+genuinely can't reach (see D-176). Don't hand over a check you could have run.
+
 ### Decision tiers
 
 | Tier | What it covers | What you do |
@@ -80,9 +86,11 @@ At the end of every phase:
    this for phase work. Use the standard `phase N: <what changed>` message.
 6. Set the phase to `AWAITING VERIFICATION` in the Phase Status table. **Never write `DONE` yourself** —
    only the owner's confirmation moves a phase to `DONE`, and only their part is left to confirm.
-7. Hand the owner a short list of *only* the checks that genuinely need their own browser or eyes —
-   what to click, what to expect, in order. If a phase has no such check, say so plainly instead of
-   inventing one; don't ask them to review anything you already verified yourself.
+7. Before handing anything to the owner, run every live-testable check yourself via `chrome-devtools`
+   MCP (load unpacked, click through it, read storage/console). Hand the owner a short list of *only*
+   the checks that genuinely need their own browser or eyes — what to click, what to expect, in
+   order. If a phase has no such check, say so plainly instead of inventing one; don't ask them to
+   review anything you already verified yourself.
 
 If an `OPEN` row owned by Human blocks the current phase, stop and name the ID. Don't guess past it.
 

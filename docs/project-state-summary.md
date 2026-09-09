@@ -61,8 +61,12 @@ one batched `REMOVE_COMPLETED` writer command that re-derives the match set serv
 integrates deletion-revision (7.6). `meetsMinimumWatched` fixed to inclusive `>=`, matching CP-42h's
 "less than this" (D-179). `pendingSeekToEnd` distinguishes a genuine finish from a seek-to-end for the
 `ended` write (D-178). Self-verified: `node tests/run.js` — 56 cases, zero regressions, 6 new Phase 7
-cases (D-182). No live browser verification this session (see owner checks below). Decisions
-D-104–D-106, D-116–D-120, D-177–D-182.
+cases (D-182). **Live-verified via `chrome-devtools-mcp` (D-183):** precondition-wrote a mixed
+5-entry library and drove the real popup — row display, live count, include-pinned toggle,
+confirm/cancel/commit (both scopes), and the "Only at the end" segment all matched exactly; storage
+read back confirmed only the intended rows were removed. Real playback reaching a genuine `ended`
+event was not exercised live (sandbox network limits, D-051/D-060/D-176 precedent) — covered by the
+harness instead. Decisions D-104–D-106, D-116–D-120, D-177–D-183.
 
 ## Doc versions
 
