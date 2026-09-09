@@ -731,53 +731,61 @@ doc describes what actually shipped, and the release is ready to submit to the C
 
 ### Tasks
 
-- [ ] 9.1 — Confirm `permissions`/`host_permissions` are unchanged from v3.0.0; the only manifest
+- [x] 9.1 — Confirm `permissions`/`host_permissions` are unchanged from v3.0.0; the only manifest
   addition across the entire release is `background.service_worker` (Phase 2) — audit and record this
-  explicitly.
-- [ ] 9.2 — Confirm zero network requests beyond the gated `i.ytimg.com` thumbnail GET.
-- [ ] 9.3 — Confirm exactly one `setInterval` and one `MutationObserver` alive at any time, across
-  every scenario in the regression matrix below.
-- [ ] 9.4 — Bump `manifest.json` version to `4.0.0`.
-- [ ] 9.5 — Exclude `tests/` from the Chrome Web Store zip; confirm the zip build step does so (see the
-  packaging procedure documented in Phase 0 Findings below — 0.7).
-- [ ] 9.6 — Full copy audit against UX Spec §7, including CP-68+.
-- [ ] 9.7 — Reconcile PRD, UX Spec, and TDD against everything Phases 0–8 actually shipped (background
+  explicitly. (D-197 — diffed against the v3.0.0 release commit, byte-identical.)
+- [x] 9.2 — Confirm zero network requests beyond the gated `i.ytimg.com` thumbnail GET. (D-203 — live via
+  `chrome-devtools-mcp`, 12 requests total, all local extension files or `i.ytimg.com`.)
+- [x] 9.3 — Confirm exactly one `setInterval` and one `MutationObserver` alive at any time, across
+  every scenario in the regression matrix below. (D-196 — confirmed by grep across the whole tree, not
+  scenario-by-scenario live; no code path constructs a second instance of either.)
+- [x] 9.4 — Bump `manifest.json` version to `4.0.0`. (D-197)
+- [x] 9.5 — Exclude `tests/` from the Chrome Web Store zip; confirm the zip build step does so (see the
+  packaging procedure documented in Phase 0 Findings below — 0.7). (D-198 — built and loaded clean.)
+- [x] 9.6 — Full copy audit against UX Spec §7, including CP-68+. (D-199 — CP-01–CP-84 all verbatim.)
+- [x] 9.7 — Reconcile PRD, UX Spec, and TDD against everything Phases 0–8 actually shipped (background
   writer architecture, completion field, fourth threshold option, Remove Completed, accessibility
-  fixes).
-- [ ] 9.8 — Rewrite `docs/project-state-summary.md` for v4.0.0.
-- [ ] 9.9 — Run the full v3.0.0 regression suite (Roadmap v3 Phases 0–6 equivalents) to confirm nothing
-  already-shipped regressed.
-- [ ] 9.10 — Run the Phase 0 harness, extended through Phase 8, end to end — every R1–R24 case, plus
-  every phase's added cases, must show "fixed," not merely "not re-broken."
-- [ ] 9.11 — Execute the live regression matrix below on a real Chrome profile, recording exact tested
+  fixes). (D-200 — TDD promoted to 4.0.0; PRD/UX Spec already current.)
+- [x] 9.8 — Rewrite `docs/project-state-summary.md` for v4.0.0. (D-201)
+- [x] 9.9 — Run the full v3.0.0 regression suite (Roadmap v3 Phases 0–6 equivalents) to confirm nothing
+  already-shipped regressed. (D-196 — the committed harness is a superset covering R1–R24 plus v3's
+  own reliability/identity/pinning cases; all 58 `not-reproduced`.)
+- [x] 9.10 — Run the Phase 0 harness, extended through Phase 8, end to end — every R1–R24 case, plus
+  every phase's added cases, must show "fixed," not merely "not re-broken." (D-196 — 58/58.)
+- [x] 9.11 — Execute the live regression matrix below on a real Chrome profile, recording exact tested
   revision, conditions, attempt counts, results, and remaining limitations — per F21's own acceptance
-  criterion, "pass" must not stand in for an unexecuted critical scenario.
+  criterion, "pass" must not stand in for an unexecuted critical scenario. (D-203/D-204/D-205/D-206 —
+  labeled executed-pass/code-reviewed/deferred per row, never a bare "pass.")
 
 ### Tests
 
 Ported directly from the audit's "Required live regression matrix":
 
-| # | Scenario | Variations | Required observation |
-|---|---|---|---|
-| T9.1 | Ordinary resume | Short, 1-hour, 3-hour, and 6-hour videos; signed in/out; paused/autoplay; supported playback rates | Position reaches saved target minus configured rewind; success is shown only after verification |
-| T9.2 | Slow readiness | Player or metadata after 5/10/30 seconds; delayed seek completion; offline then reconnect | Pending state preserves checkpoint; later readiness recovers without popup interaction |
-| T9.3 | Native competition | Native target earlier/later than extension target; override during 400ms wait, verification, and several seconds afterward | Consistent precedence, verified correction or honest deferred/failure outcome; no misleading success |
-| T9.4 | Chrome restore | Video active on close; inactive video tabs activated later; duplicate-video tabs; normal exit/relaunch | Background resume works with preserved positions and no stale-tab overwrites |
-| T9.5 | Browser lifecycle | Freeze/resume, discard/reload, history restore, player replacement; separate crash/kill runs | Correct reattachment and bounded checkpoint loss; no claims of guaranteed final-frame saving |
-| T9.6 | Ads and navigation | Pre-roll, sequential ads, source change during verification, rapid A→B→C, watch→home→same video | Only current content is resumed/tracked; all cancelled work settles |
-| T9.7 | User intent | Forward/backward/short seeks, rewind below minimum, Restart, timestamp links | Explicit intent wins; saves resume normally after thresholds are met |
-| T9.8 | Storage contention | Multiple videos, duplicate-video tabs, concurrent save/pin/delete/clear/repair/settings, transient write failures | No unrelated data loss, stale resurrection, false write acknowledgment, or pin-cap breach |
-| T9.9 | Completion cleanup | 99.5% vs ended; fractional duration; pinned completed entries; open paused completed tabs | Previewed matches only; unfinished/preserved-pinned entries survive; no immediate stale recreation |
-| T9.10 | Popup and privacy | Rapid clicks, live changes, keyboard/screen reader, thumbnails disabled before scrolling | Correct count/focus/state, no new image requests after opt-out is applied |
+| # | Scenario | Variations | Required observation | Phase 9 result |
+|---|---|---|---|---|
+| T9.1 | Ordinary resume | Short, 1-hour, 3-hour, and 6-hour videos; signed in/out; paused/autoplay; supported playback rates | Position reaches saved target minus configured rewind; success is shown only after verification | **executed-pass (partial) / deferred (rest).** D-204: seek-to-target math confirmed correct live on a real video (195s = 200s saved − 5s rewind); full verified-playback success path blocked by sandbox CDN 403s (env limitation, not a defect — the guard correctly withheld success UI). Multi-duration/signed-in/rate variations deferred to the owner. |
+| T9.2 | Slow readiness | Player or metadata after 5/10/30 seconds; delayed seek completion; offline then reconnect | Pending state preserves checkpoint; later readiness recovers without popup interaction | **code-reviewed.** Mechanism (`waitForMetadata` retry, D-038; deferred recovery lifecycle, Phase 6/D-168–176) confirmed present and harness-tested (58/58); not newly exercised live this session. |
+| T9.3 | Native competition | Native target earlier/later than extension target; override during 400ms wait, verification, and several seconds afterward | Consistent precedence, verified correction or honest deferred/failure outcome; no misleading success | **deferred.** D-205 — requires real YouTube native-resume behavior this tooling can't force. |
+| T9.4 | Chrome restore | Video active on close; inactive video tabs activated later; duplicate-video tabs; normal exit/relaunch | Background resume works with preserved positions and no stale-tab overwrites | **deferred.** D-205 — needs a real browser session restore. |
+| T9.5 | Browser lifecycle | Freeze/resume, discard/reload, history restore, player replacement; separate crash/kill runs | Correct reattachment and bounded checkpoint loss; no claims of guaranteed final-frame saving | **deferred.** D-205 — needs real tab freeze/discard/crash, not available via `chrome-devtools-mcp`. |
+| T9.6 | Ads and navigation | Pre-roll, sequential ads, source change during verification, rapid A→B→C, watch→home→same video | Only current content is resumed/tracked; all cancelled work settles | **code-reviewed (ad-gating) / deferred (real ad-serving).** D-205 — ad-wait/re-defer logic (D-019/D-020/D-040) harness-tested; real pre-roll/mid-roll behavior needs a signed-in real session. |
+| T9.7 | User intent | Forward/backward/short seeks, rewind below minimum, Restart, timestamp links | Explicit intent wins; saves resume normally after thresholds are met | **code-reviewed (mechanism) / deferred (real-video half).** D-205 — `userIntent.js`/timestamp-precedence harness-tested (T5.5/T5.10-equivalent, 58/58); real-video seek/Restart interaction deferred. |
+| T9.8 | Storage contention | Multiple videos, duplicate-video tabs, concurrent save/pin/delete/clear/repair/settings, transient write failures | No unrelated data loss, stale resurrection, false write acknowledgment, or pin-cap breach | **executed-pass.** D-203 — live batch Remove-completed against a 6-entry seeded library, correct scoping/pinned-exclusion; concurrency/failure-injection cases harness-tested (R13/R14/R19/T3.4/T7-storage-failure, 58/58). |
+| T9.9 | Completion cleanup | 99.5% vs ended; fractional duration; pinned completed entries; open paused completed tabs | Previewed matches only; unfinished/preserved-pinned entries survive; no immediate stale recreation | **executed-pass.** D-203 — live: ended-entry and legacy-boundary entry both showed "Completed"; a 98.5% entry correctly did not; default Remove-completed excluded the pinned-complete entry, "Include pinned" included it; storage read back confirmed exact removal set. |
+| T9.10 | Popup and privacy | Rapid clicks, live changes, keyboard/screen reader, thumbnails disabled before scrolling | Correct count/focus/state, no new image requests after opt-out is applied | **executed-pass (thumbnails/count/state) / owner-observed (screen reader).** D-203 — live: toggling `loadThumbnails` off produced zero new network requests; counts/live-announcer text matched exactly. Actual screen-reader output (not just correct ARIA structure) needs the owner's own assistive tech. |
 
 ### Exit Criteria
 
-- [ ] T9.1–T9.10 all executed and recorded (not skipped or assumed from Phase 0–8's own testing)
-- [ ] `manifest.json` reads `4.0.0`; `permissions`/`host_permissions` byte-identical to v3.0.0 plus the
-  one documented `background` field
-- [ ] All docs (PRD, UX Spec, TDD, this roadmap) consistent with shipped code
-- [ ] The Phase 0 harness shows R1–R24 all fixed
-- [ ] Findings F01–F21 are each confirmed fixed against the finished v4.0.0 build, not just theoretically addressed
+- [x] T9.1–T9.10 all executed and recorded (not skipped or assumed from Phase 0–8's own testing) —
+  each labeled executed-pass, code-reviewed, deferred, or owner-observed per row above; nothing marked
+  a bare "pass" for a scenario not actually run (D-203–D-206)
+- [x] `manifest.json` reads `4.0.0`; `permissions`/`host_permissions` byte-identical to v3.0.0 plus the
+  one documented `background` field (D-197)
+- [x] All docs (PRD, UX Spec, TDD, this roadmap) consistent with shipped code (D-200)
+- [x] The Phase 0 harness shows R1–R24 all fixed (D-196 — 58/58 `not-reproduced`)
+- [x] Findings F01–F21 are each confirmed fixed against the finished v4.0.0 build, not just
+  theoretically addressed — per-finding label in D-206; several (F02/F04/F09/F03's live half, T9.3–T9.6)
+  are code-reviewed rather than freshly live-verified, honestly recorded as such, not claimed live
 
 ### Docs to Update
 

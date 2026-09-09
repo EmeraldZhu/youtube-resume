@@ -7,10 +7,10 @@
 |---|---|
 | **Product** | YouTube Resume |
 | **Document Type** | Technical Design Document (TDD) |
-| **Version** | 4.0.0-draft |
+| **Version** | 4.0.0 |
 | **Previous Version** | 3.0.0 |
-| **Status** | Reconciled against shipped v3.0.0 code (Phase 6, Roadmap v3 6.6); §1/§1.2/§2 updated for the approved v4 architecture (D-102), remaining sections pending per-phase updates as Roadmap v4 lands |
-| **Last Updated** | 2026-09-08 |
+| **Status** | Final — reconciled against shipped v4.0.0 code (Phase 9, Roadmap v4 9.7); every module section (§4), the storage schema (§6.2), and known limitations (§12.5) reflect what Phases 0–8 actually shipped |
+| **Last Updated** | 2026-09-09 |
 | **Companion Document** | PRD_YouTube_Resume.md v4.0.0 |
 
 ---
@@ -125,18 +125,22 @@ youtube-resume/
 ├── utils/
 │   ├── debugLogger.js          # DEBUG-gated tracing (Phase 1+, §7.1); no-op unless DEBUG = true
 │   ├── youtubeUtils.js         # URL parsing, videoId extraction, title/channel capture (v2)
-│   └── timeUtils.js            # Threshold math, resume calculations
+│   ├── timeUtils.js            # Threshold math, resume calculations
+│   └── userIntent.js           # v4 (Phase 4) — corroborated-user-seek detection, pure functions only
 │
 ├── popup/                      # v2 — Phase 6 (settings) / Phase 8 (saved videos list)
 │   ├── popup.html              # Two views: #view-list (default), #view-settings
 │   ├── popup.js                # List rendering + settings wiring; no storage logic of its own
 │   └── popup.css               # 360px fixed width, 560px max height (UX Spec §6.2, D-010)
 │
-└── assets/
-    └── icons/
-        ├── icon-16.png
-        ├── icon-48.png
-        └── icon-128.png
+├── assets/
+│   └── icons/
+│       ├── icon-16.png
+│       ├── icon-48.png
+│       └── icon-128.png
+│
+└── tests/                      # v4 Phase 0 (D-108) — dependency-free Node harness (`node tests/run.js`);
+                                 # committed to the repo but excluded from the Chrome Web Store zip (9.5)
 ```
 
 **Design rationale:**
@@ -2246,14 +2250,19 @@ There is no global state object. Each module manages its own internal state priv
 
 ### 6.2 Persistent State
 
-Persistent state lives in `chrome.storage.local` under three root keys (v2, PRD §7.2): `youtubeResume`
-(videoId → `VideoProgress`, unchanged from v1), `youtubeResumeSettings` (user preferences), and
-`youtubeResumeSchema` (integer schema version, currently `3` as of v3.0 Phase 4, D-071 — `pinned` is
-the only field it adds, optional and defaulting to unpinned). The latter two are siblings of
-`youtubeResume`, never nested inside it, since its keys are counted for the 200-entry eviction cap
-(D-013). No module other than `storageManager.js` may read from or write to `chrome.storage.local`
-directly — this now also covers the popup, which loads `storage/storageManager.js` as of Phase 4
-instead of calling `chrome.storage.local` itself.
+Persistent state lives in `chrome.storage.local` under four root keys (v4, PRD §7.2): `youtubeResume`
+(videoId → `VideoProgress`), `youtubeResumeSettings` (user preferences), `youtubeResumeSchema`
+(integer schema version, currently `4` as of v4 Phase 7, D-104), and `youtubeResumeQuarantine` (v4
+Phase 1, D-127 — entries the boundary-repair pass couldn't safely resolve; never read by any
+resume/tracking/popup code path and never auto-emptied). `youtubeResume`'s `VideoProgress` shape has
+grown purely additively across v2–v4: `time`, `duration`, `updated` (v1) plus optional `title` (v2,
+D-012), `pinned` (v3, D-071), `channel` (v3 polish, D-056), and `ended` (v4, D-104) — every field
+after `duration` is optional, so an older stored entry is always still valid. The three keys beside
+`youtubeResume` are its siblings, never nested inside it, since its keys are counted for the
+200-unpinned-entry eviction cap (D-013; up to 20 pinned entries are exempt, D-067). No module other
+than `storageManager.js` (reads) and `background/storageWriter.js` (writes, v4 Phase 2, D-102) may
+touch `chrome.storage.local` directly — this also covers the popup, which loads
+`storage/storageManager.js` as of Phase 4 instead of calling `chrome.storage.local` itself.
 
 **Settings propagation (v2 — Phase 7, Roadmap 7.3, 7.6):** `bootstrap.js` reads `Settings` from
 `storageManager.getSettings()` exactly once per navigation and passes the object to
@@ -2509,12 +2518,22 @@ Target: `youtubeUtils.js`, `timeUtils.js`, `storageManager.js`
 | Pin-limit-reached inline message (CP-65, `.pin-cap-message`) is not wrapped in `aria-live`, so a screen-reader user gets no announcement of the refusal | ❌ Gap, not yet fixed | Found during Phase 6 doc reconciliation (D-097, UX Spec §8.3); needs a code change, out of scope for a docs-only phase |
 | Backward-jump write guard (D-090) only protects interval-triggered saves; a pathological caller writing directly through `storageManager.saveProgress()` with a backward timestamp outside the tracked event flow is not guarded | ✅ Accepted | No such caller exists in shipped code; documented as a boundary of the fix, not a residual bug |
 
+### 12.5 Known Limitations (v4.0)
+
+| Limitation | Accepted? | Future Fix |
+|---|---|---|
+| Real browser session-restoration (freeze/discard/crash-and-relaunch), true multi-hour soak playback, and 25-repetition real-video SPA navigation are not exercisable from this project's available live-testing tooling | ✅ Accepted, substituted per-scenario | Phase 9 substituted synthetic-navigation/reload+precondition techniques (same pattern as v3 D-059–D-062) and logged every substitution as a Tier 2 decision (D-063+) naming what was and wasn't executed live, per F21's own acceptance bar; full real-session runs remain for the owner (Roadmap v4 K7) |
+| `youtubeResumeQuarantine` has no popup surface — a quarantined entry is invisible to the user and never auto-cleared | ✅ Accepted by design | D-127 scoped it as a safety net for the boundary-repair pass, not a user-facing feature; a future phase could add a management UI if quarantine volume becomes a real-world problem |
+| A background service worker (D-102) can be terminated by the browser between commands; an in-flight mutation that hasn't yet been acknowledged is retried on the next natural trigger, not recovered mid-flight | ✅ Accepted | Every writer command is idempotent and self-described by design (Roadmap v4 K1); no durability guarantee beyond "never worse than pre-v4 single-writer behavior" was ever the goal |
+| The fourth `completionThreshold` value ("Only at the end", D-106/Phase 7) changes the qualitative meaning of the setting rather than just its number; a user migrating from a percentage value sees no interstitial explaining the change | ✅ Accepted | UX Spec CP-43h's updated helper text carries the distinction in-place; no migration prompt was scoped (Roadmap v4 K6) |
+
 ---
 
-*This document is the authoritative technical specification for YouTube Resume v3.0.0, reconciled
-against shipped code in v2.0 Phase 9 (D-030) and again in v3.0 Phase 6 (Roadmap v3 6.6). Per
-CLAUDE.md's precedence rules, this TDD outranks the UX Spec, Roadmap, and PRD for implementation
-detail — but shipped code outranks all four; where a future discrepancy is found, fix the
-code-affecting doc and log a Tier 2 decision in `DECISIONS.md`, don't silently drift. §11.3's v1.0
-manual QA checklist is kept intact as the regression baseline (see §11 intro) — nothing elsewhere in
-this document should be read as superseding it.*
+*This document is the authoritative technical specification for YouTube Resume v4.0.0, reconciled
+against shipped code in v2.0 Phase 9 (D-030), v3.0 Phase 6 (Roadmap v3 6.6), and v4.0 Phase 9
+(Roadmap v4 9.7) — every module section (§4) and the storage schema (§6.2) reflect what Phases 0–8
+actually shipped, not what was planned. Per CLAUDE.md's precedence rules, this TDD outranks the UX
+Spec, Roadmap, and PRD for implementation detail — but shipped code outranks all four; where a future
+discrepancy is found, fix the code-affecting doc and log a Tier 2 decision in `DECISIONS.md`, don't
+silently drift. §11.3's v1.0 manual QA checklist is kept intact as the regression baseline (see §11
+intro) — nothing elsewhere in this document should be read as superseding it.*

@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "YouTube Resume",
-  "version": "3.0.0",
+  "version": "4.0.0",
   "description": "Automatically resume YouTube videos exactly where you left off.",
   "permissions": ["storage"],
   "host_permissions": ["https://www.youtube.com/*"],

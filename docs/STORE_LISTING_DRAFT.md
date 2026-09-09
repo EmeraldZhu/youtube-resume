@@ -65,3 +65,45 @@ YouTube Resume only asks for what it needs: local storage, and access to youtube
   this plainly rather than omitting it; adjust as you see fit, but don't drop the disclosure.
 - Link the privacy policy from `docs/PRIVACY_POLICY_DRAFT.md` (or its published URL) wherever the
   Store's privacy field asks for one.
+
+---
+
+## v4.0.0 changelog draft (Phase 9)
+
+**STATUS: DRAFT — NOT SUBMITTED, NOT PUBLISHED.** Added by Phase 9 (Roadmap v4 9's changelog task)
+without editing anything above. Written from what Phases 0–8 actually shipped, not from the roadmap's
+plan. Owner reviews and edits before use, same as the v2.0.0 draft above.
+
+**What's new in 4.0**
+
+- **Far more reliable resume** — resume now waits for a verified, confirmed seek before ever
+  declaring success; a restored, backgrounded, or slow-loading tab recovers automatically without
+  reopening the extension; concurrent tabs and rapid actions (pin, remove, settings, clear) no longer
+  overwrite or resurrect each other's data.
+- **"Remove completed" videos in one action** — clear out everything you've actually finished from
+  the saved videos panel, with a live count and the option to include or exclude pinned videos.
+  Finished is now based on whether a video genuinely played to the end, not a rounded percentage.
+- **A fourth "finished" option: "Only at the end"** — for viewers who don't want a video to stop
+  offering resume until it's truly over, however long it is.
+- **Smoother, more accessible saved videos panel** — the list now updates live as your other tabs
+  save progress, keyboard and screen-reader support was substantially improved (per-video labels,
+  clearer announcements when videos are removed), and thumbnails can be turned off instantly without
+  a pending request finishing anyway.
+- **Explicit timestamp links now take precedence** — opening a video with a specific starting time
+  (`?t=`) is respected over your saved position.
+- **Under-the-hood storage rework** — all saves now go through a single serialized writer, closing a
+  class of rare data-loss bugs possible under v3.0 when multiple tabs or rapid actions overlapped. No
+  visible change for most users; more dependable saves for everyone.
+
+**Permissions and privacy — unchanged from v3.0**
+
+No new permissions were added. Storage stays local-only; the only network request anywhere is still
+the optional `i.ytimg.com` thumbnail image load, unchanged from v3.0 and still governed by the same
+"Load thumbnails" setting.
+
+**Notes for the owner**
+
+- Every claim above is backed by a specific Phase 0–8 fix — see `docs/DECISIONS.md` D-100 onward and
+  `docs/ROADMAP_v4.md` if you want the technical detail behind any line before publishing.
+- No screenshots redone for this pass; the v2.0.0 set above is still broadly representative. Consider
+  a fresh "Remove completed" screenshot if you want one showing the new feature specifically.
